@@ -1,0 +1,15 @@
+[package]
+name = "ji"
+version = "0.1.0"
+authors = ["Micah Johnston <micah@glowcoil.com>"]
+edition = "2018"
+
+[dependencies]
+glium = "0.23.0"
+
+[dependencies.rusttype]
+version = "*"
+features = ["gpu_cache"]
+
+[patch.crates-io]
+glutin = { path = "../glutin" }
