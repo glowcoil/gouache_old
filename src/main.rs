@@ -1,4 +1,5 @@
 mod render;
+mod arena;
 
 use render::*;
 
