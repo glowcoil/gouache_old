@@ -1,7 +1,9 @@
 mod render;
+mod ui;
 mod arena;
 
 use render::*;
+use ui::*;
 
 #[macro_use]
 extern crate glium;
@@ -14,11 +16,12 @@ fn main() {
     let window = glutin::WindowBuilder::new()
         .with_dimensions(glutin::dpi::LogicalSize::new(800.0, 600.0))
         .with_title("justitracker");
-    let context = glutin::ContextBuilder::new();
+    let context = glutin::ContextBuilder::new().with_vsync(true);
     let display = glium::Display::new(window, context, &events_loop).unwrap();
 
     let dpi_factor = display.gl_window().get_hidpi_factor();
     let mut renderer = Renderer::new(&display, dpi_factor as f32);
+    let mut ui = UI::new();
 
     let font = rusttype::FontCollection::from_bytes(include_bytes!("../sawarabi-gothic-medium.ttf") as &[u8]).unwrap().into_font().unwrap();
 
@@ -37,11 +40,17 @@ fn main() {
         i = (i + 1) % frames.len();
         let fps = 100000.0 / (sum as f32);
         let fps_text = fps.round().to_string();
-        let mut glyphs = Vec::with_capacity(fps_text.len());
-        for (i,c) in fps_text.chars().enumerate() {
-            glyphs.push(font.glyph(c).scaled(rusttype::Scale::uniform(18.0)).positioned(rusttype::point(10.0 * i as f32, 20.0)));
-        }
-        renderer.render(&display, &[Cmd::DrawGlyphs { glyphs }]);
+
+        let (width, height) = display.get_framebuffer_dimensions();
+
+        {
+            let mut frame = ui.frame();
+            for (i,c) in fps_text.chars().enumerate() {
+                frame.glyph(font.glyph(c).scaled(rusttype::Scale::uniform(18.0)).positioned(rusttype::point(10.0 * i as f32, 20.0)));
+            }
+            let cmds = frame.render();
+            renderer.render(&display, &cmds);
+        };
 
         events_loop.poll_events(|ev| {
             match ev {
