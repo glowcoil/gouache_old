@@ -1,8 +1,19 @@
 use std::ffi::{CStr, CString};
 use gl::types::{GLuint, GLint, GLchar, GLenum};
 
+use crate::alloc::Slab;
+
+#[derive(Copy, Clone)]
 pub enum TexFormat { RGBA, A }
-pub type TexId = u32;
+pub type TexId = usize;
+
+macro_rules! offset {
+    ($type:ty, $field:ident) => { &(*(0 as *const $type)).$field as *const _ as usize }
+}
+
+trait VertexAttribs {
+    fn attribs();
+}
 
 #[derive(Copy, Clone)]
 pub struct Vertex {
@@ -10,8 +21,11 @@ pub struct Vertex {
     pub col: [f32; 4],
 }
 
-macro_rules! offset {
-    ($type:ty, $field:ident) => { unsafe { &(*(0 as *const $type)).$field as *const _ as usize } }
+#[derive(Copy, Clone)]
+pub struct VertexUV {
+    pub pos: [f32; 3],
+    pub col: [f32; 4],
+    pub uv: [f32; 2],
 }
 
 const VERT: &[u8] = b"
@@ -56,6 +70,7 @@ void main() {
 \0";
 const FRAG_TEX_RGBA: &[u8] = b"
 #version 330
+
 uniform sampler2D tex;
 
 in vec2 v_uv;
@@ -85,6 +100,7 @@ void main() {
 \0";
 const FRAG_TEX_A: &[u8] = b"
 #version 330
+
 uniform sampler2D tex;
 
 in vec4 v_col;
@@ -96,10 +112,6 @@ void main() {
     f_col = v_col * vec4(1, 1, 1, texture(tex, v_uv).r);
 }
 \0";
-
-pub struct Renderer {
-    prog: GLuint,
-}
 
 fn shader(shader_src: &CStr, shader_type: GLenum) -> Result<GLuint, String> {
     unsafe {
@@ -150,14 +162,44 @@ fn program(vert_src: &CStr, frag_src: &CStr) -> Result<GLuint, String> {
     }
 }
 
+struct Texture {
+    format: TexFormat,
+    tex: GLuint,
+}
+
+pub struct Renderer {
+    prog: GLuint,
+    prog_tex_rgba: GLuint,
+    prog_tex_a: GLuint,
+
+    textures: Slab<Texture>,
+}
+
 impl Renderer {
     pub fn new() -> Renderer {
         let prog: GLuint = program(
             &CStr::from_bytes_with_nul(VERT).unwrap(),
             &CStr::from_bytes_with_nul(FRAG).unwrap()).unwrap();
 
+        let prog_tex_rgba: GLuint = program(
+            &CStr::from_bytes_with_nul(VERT_TEX_RGBA).unwrap(),
+            &CStr::from_bytes_with_nul(FRAG_TEX_RGBA).unwrap()).unwrap();
+
+        let prog_tex_a: GLuint = program(
+            &CStr::from_bytes_with_nul(VERT_TEX_A).unwrap(),
+            &CStr::from_bytes_with_nul(FRAG_TEX_A).unwrap()).unwrap();
+
+        unsafe {
+            gl::BlendFunc(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA);
+            gl::Enable(gl::BLEND);
+        }
+
         Renderer {
             prog,
+            prog_tex_rgba,
+            prog_tex_a,
+
+            textures: Slab::new(),
         }
     }
 
@@ -180,7 +222,7 @@ impl Renderer {
             gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, ibo);
 
             gl::EnableVertexAttribArray(0);
-            gl::VertexAttribPointer(0, 2, gl::FLOAT, gl::FALSE, std::mem::size_of::<Vertex>() as GLint, offset!(Vertex, pos) as *const gl::types::GLvoid);
+            gl::VertexAttribPointer(0, 3, gl::FLOAT, gl::FALSE, std::mem::size_of::<Vertex>() as GLint, offset!(Vertex, pos) as *const gl::types::GLvoid);
             gl::EnableVertexAttribArray(1);
             gl::VertexAttribPointer(1, 4, gl::FLOAT, gl::FALSE, std::mem::size_of::<Vertex>() as GLint, offset!(Vertex, col) as *const gl::types::GLvoid);
 
@@ -188,19 +230,108 @@ impl Renderer {
 
             gl::DrawElements(gl::TRIANGLES, indices.len() as i32, gl::UNSIGNED_SHORT, 0 as *const gl::types::GLvoid);
 
+            gl::DisableVertexAttribArray(0);
+            gl::DisableVertexAttribArray(1);
+
             gl::DeleteVertexArrays(1, &vao);
             gl::DeleteBuffers(1, &ibo);
             gl::DeleteBuffers(1, &vbo);
         }
     }
 
-    pub fn draw_tex(&mut self, vertices: &[Vertex], indices: &[u16], tex_id: TexId) {
+    pub fn draw_tex(&mut self, vertices: &[VertexUV], indices: &[u16], tex_id: TexId) {
+        let tex = self.textures.get(tex_id).unwrap();
+        unsafe {
+            let mut vbo: u32 = 0;
+            gl::GenBuffers(1, &mut vbo);
+            gl::BindBuffer(gl::ARRAY_BUFFER, vbo);
+            gl::BufferData(gl::ARRAY_BUFFER, (vertices.len() * std::mem::size_of::<VertexUV>()) as isize, vertices.as_ptr() as *const std::ffi::c_void, gl::STATIC_DRAW);
 
+            let mut ibo: u32 = 0;
+            gl::GenBuffers(1, &mut ibo);
+            gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, ibo);
+            gl::BufferData(gl::ELEMENT_ARRAY_BUFFER, (indices.len() * std::mem::size_of::<u16>()) as isize, indices.as_ptr() as *const std::ffi::c_void, gl::STATIC_DRAW);
+
+            let mut vao: u32 = 0;
+            gl::GenVertexArrays(1, &mut vao);
+            gl::BindVertexArray(vao);
+            gl::BindBuffer(gl::ARRAY_BUFFER, vbo);
+            gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, ibo);
+
+            gl::EnableVertexAttribArray(0);
+            gl::VertexAttribPointer(0, 3, gl::FLOAT, gl::FALSE, std::mem::size_of::<VertexUV>() as GLint, offset!(VertexUV, pos) as *const gl::types::GLvoid);
+            gl::EnableVertexAttribArray(1);
+            gl::VertexAttribPointer(1, 4, gl::FLOAT, gl::FALSE, std::mem::size_of::<VertexUV>() as GLint, offset!(VertexUV, col) as *const gl::types::GLvoid);
+            gl::EnableVertexAttribArray(2);
+            gl::VertexAttribPointer(2, 2, gl::FLOAT, gl::FALSE, std::mem::size_of::<VertexUV>() as GLint, offset!(VertexUV, uv) as *const gl::types::GLvoid);
+
+            gl::ActiveTexture(gl::TEXTURE0);
+            gl::BindTexture(gl::TEXTURE_2D, tex.tex);
+
+            match tex.format {
+                TexFormat::RGBA => { gl::UseProgram(self.prog_tex_rgba); }
+                TexFormat::A => { gl::UseProgram(self.prog_tex_a); }
+            }
+            gl::UseProgram(self.prog_tex_a);
+            gl::Uniform1i(0, 0);
+
+            gl::DrawElements(gl::TRIANGLES, indices.len() as i32, gl::UNSIGNED_SHORT, 0 as *const gl::types::GLvoid);
+
+            gl::DisableVertexAttribArray(0);
+            gl::DisableVertexAttribArray(1);
+            gl::DisableVertexAttribArray(2);
+
+            gl::DeleteVertexArrays(1, &vao);
+            gl::DeleteBuffers(1, &ibo);
+            gl::DeleteBuffers(1, &vbo);
+        }
     }
 
-    #[inline]
-    fn pixel_to_ndc(&self, x: f32, y: f32, screen_width: f32, screen_height: f32) -> (f32, f32) {
-        (2.0 * (x / screen_width as f32 - 0.5), 2.0 * (1.0 - y / screen_height as f32 - 0.5))
+    pub fn create_tex(&mut self, format: TexFormat, width: usize, height: usize, pixels: &[u8]) -> TexId {
+        let mut tex: GLuint = 0;
+        unsafe {
+            gl::GenTextures(1, &mut tex);
+            gl::BindTexture(gl::TEXTURE_2D, tex);
+            match format {
+                TexFormat::RGBA => {
+                    assert!(pixels.len() == width * height * 4);
+                    gl::TexImage2D(gl::TEXTURE_2D, 0, gl::RGBA as GLint, width as i32, height as i32, 0, gl::RGBA, gl::UNSIGNED_INT_8_8_8_8, pixels.as_ptr() as *const std::ffi::c_void);
+                }
+                TexFormat::A => {
+                    assert!(pixels.len() == width * height);
+                    gl::TexImage2D(gl::TEXTURE_2D, 0, gl::RED as GLint, width as i32, height as i32, 0, gl::RED, gl::UNSIGNED_BYTE, pixels.as_ptr() as *const std::ffi::c_void);
+                }
+            }
+            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::NEAREST as i32);
+            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::NEAREST as i32);
+        }
+        self.textures.insert(Texture { format, tex })
+    }
+
+    pub fn update_tex(&mut self, texture: TexId, x: usize, y: usize, width: usize, height: usize, pixels: &[u8]) {
+        let Texture { format, tex } = self.textures.get(texture).unwrap();
+        unsafe { gl::BindTexture(gl::TEXTURE_2D, *tex); }
+        match format {
+            TexFormat::RGBA => {
+                if pixels.len() != width * height * 4 { panic!() }
+                unsafe {
+                    gl::TexSubImage2D(gl::TEXTURE_2D, 0, x as i32, y as i32, width as i32, height as i32, gl::RGBA, gl::UNSIGNED_INT_8_8_8_8, pixels.as_ptr() as *const std::ffi::c_void);
+                }
+            }
+            TexFormat::A => {
+                if pixels.len() != width * height { panic!() }
+                unsafe {
+                    gl::TexSubImage2D(gl::TEXTURE_2D, 0, x as i32, y as i32, width as i32, height as i32, gl::RED, gl::UNSIGNED_BYTE, pixels.as_ptr() as *const std::ffi::c_void);
+                }
+            }
+        }
+    }
+
+    pub fn delete_tex(&mut self, texture: TexId) {
+        let Texture { tex, .. } = self.textures.remove(texture).unwrap();
+        unsafe {
+            gl::DeleteTextures(1, &tex);
+        }
     }
 }
 
@@ -208,6 +339,17 @@ impl Drop for Renderer {
     fn drop(&mut self) {
         unsafe {
             gl::DeleteProgram(self.prog);
+            gl::DeleteProgram(self.prog_tex_rgba);
+            gl::DeleteProgram(self.prog_tex_a);
+
+            for Texture { tex, .. } in self.textures.iter() {
+                gl::DeleteTextures(1, tex);
+            }
         }
     }
+}
+
+#[inline]
+fn pixel_to_ndc(x: f32, y: f32, screen_width: f32, screen_height: f32) -> (f32, f32) {
+    (2.0 * (x / screen_width as f32 - 0.5), 2.0 * (1.0 - y / screen_height as f32 - 0.5))
 }

@@ -17,8 +17,7 @@ fn main() {
         .with_dimensions(glutin::dpi::LogicalSize::new(800.0, 600.0))
         .with_title("justitracker");
     let context = glutin::ContextBuilder::new()
-        .with_srgb(true)
-        .with_multisampling(4);
+        .with_srgb(true);
     let gl_window = glutin::GlWindow::new(window, context, &events_loop).unwrap();
 
     unsafe { gl_window.make_current().unwrap(); }
@@ -29,6 +28,13 @@ fn main() {
     // let mut ui = UI::new();
 
     // let font = rusttype::FontCollection::from_bytes(include_bytes!("../sawarabi-gothic-medium.ttf") as &[u8]).unwrap().into_font().unwrap();
+
+    let tex = renderer.create_tex(TexFormat::A, 4, 4, &[
+        255, 127, 255, 127,
+        255, 127, 255, 127,
+        255, 127, 255, 127,
+        255, 127, 255, 127,
+    ]);
 
     const FRAME: std::time::Duration = std::time::Duration::from_micros(1_000_000 / 60);
     let mut frames: [u32; 100] = [0; 100];
@@ -58,14 +64,22 @@ fn main() {
         unsafe {
             gl::ClearColor(0.1, 0.15, 0.2, 1.0);
             gl::Clear(gl::COLOR_BUFFER_BIT);
-            renderer.draw(&[
-                render::Vertex { pos: [-0.5, -0.5, 0.0], col: [0.0, 1.0, 1.0, 1.0] },
-                render::Vertex { pos: [ 0.5, -0.5, 0.0], col: [1.0, 1.0, 1.0, 1.0] },
-                render::Vertex { pos: [ 0.5,  0.5, 0.0], col: [1.0, 1.0, 1.0, 1.0] },
-                render::Vertex { pos: [-0.5,  0.5, 0.0], col: [1.0, 1.0, 1.0, 1.0] },
+            // renderer.draw(&[
+            //     render::Vertex { pos: [-0.5, -0.5, 0.0], col: [0.0, 1.0, 1.0, 1.0] },
+            //     render::Vertex { pos: [ 0.5, -0.5, 0.0], col: [1.0, 1.0, 1.0, 1.0] },
+            //     render::Vertex { pos: [ 0.5,  0.5, 0.0], col: [1.0, 1.0, 1.0, 1.0] },
+            //     render::Vertex { pos: [-0.5,  0.5, 0.0], col: [1.0, 1.0, 1.0, 1.0] },
+            // ], &[
+            //     0, 1, 2, 2, 3, 0
+            // ]);
+            renderer.draw_tex(&[
+                render::VertexUV { pos: [-0.5, -0.5, 0.0], col: [0.0, 1.0, 1.0, 1.0], uv: [0.0, 0.0] },
+                render::VertexUV { pos: [ 0.5, -0.5, 0.0], col: [1.0, 1.0, 1.0, 1.0], uv: [1.0, 0.0] },
+                render::VertexUV { pos: [ 0.5,  0.5, 0.0], col: [1.0, 1.0, 1.0, 1.0], uv: [1.0, 1.0] },
+                render::VertexUV { pos: [-0.5,  0.5, 0.0], col: [1.0, 1.0, 1.0, 1.0], uv: [0.0, 1.0] },
             ], &[
                 0, 1, 2, 2, 3, 0
-            ]);
+            ], tex);
         }
         gl_window.swap_buffers().unwrap();
 
