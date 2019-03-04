@@ -1,217 +1,213 @@
-use std::borrow::Cow;
-use glium::Surface;
-use rusttype;
+use std::ffi::{CStr, CString};
+use gl::types::{GLuint, GLint, GLchar, GLenum};
+
+pub enum TexFormat { RGBA, A }
+pub type TexId = u32;
 
 #[derive(Copy, Clone)]
 pub struct Vertex {
-    pos: [f32; 2],
-    col: [f32; 4],
+    pub pos: [f32; 3],
+    pub col: [f32; 4],
 }
 
-pub enum Cmd<'a> {
-    Draw { vertices: Vec<Vertex>, indices: Vec<u16> },
-    DrawGlyphs { glyphs: Vec<rusttype::PositionedGlyph<'a>> },
+macro_rules! offset {
+    ($type:ty, $field:ident) => { unsafe { &(*(0 as *const $type)).$field as *const _ as usize } }
 }
 
-const VERT: &'static str = "
-#version 140
+const VERT: &[u8] = b"
+#version 330
 
-in vec2 pos;
-in vec4 col;
+layout(location = 0) in vec3 pos;
+layout(location = 1) in vec4 col;
 
 out vec4 v_col;
 
 void main() {
-    gl_Position = vec4(pos, 0.0, 1.0);
+    gl_Position = vec4(pos, 1.0);
     v_col = col;
 }
-";
-const FRAG: &'static str = "
-#version 140
+\0";
+const FRAG: &[u8] = b"
+#version 330
+
 in vec4 v_col;
+
 out vec4 f_col;
 
 void main() {
     f_col = v_col;
 }
-";
-const TEXT_VERT: &'static str = "
-#version 140
+\0";
+const VERT_TEX_RGBA: &[u8] = b"
+#version 330
 
-in vec2 pos;
-in vec2 uv;
-in vec4 col;
+layout(location = 0) in vec3 pos;
+layout(location = 1) in vec4 col;
+layout(location = 2) in vec2 uv;
 
 out vec2 v_uv;
 out vec4 v_col;
 
 void main() {
-    gl_Position = vec4(pos, 0.0, 1.0);
+    gl_Position = vec4(pos, 1.0);
     v_uv = uv;
     v_col = col;
 }
-";
-const TEXT_FRAG: &'static str = "
-#version 140
+\0";
+const FRAG_TEX_RGBA: &[u8] = b"
+#version 330
 uniform sampler2D tex;
+
 in vec2 v_uv;
 in vec4 v_col;
+
+out vec4 f_col;
+
+void main() {
+    f_col = v_col * texture(tex, v_uv).rgba;
+}
+\0";
+const VERT_TEX_A: &[u8] = b"
+#version 330
+
+layout(location = 0) in vec3 pos;
+layout(location = 1) in vec4 col;
+layout(location = 2) in vec2 uv;
+
+out vec4 v_col;
+out vec2 v_uv;
+
+void main() {
+    gl_Position = vec4(pos, 1.0);
+    v_uv = uv;
+    v_col = col;
+}
+\0";
+const FRAG_TEX_A: &[u8] = b"
+#version 330
+uniform sampler2D tex;
+
+in vec4 v_col;
+in vec2 v_uv;
+
 out vec4 f_col;
 
 void main() {
     f_col = v_col * vec4(1, 1, 1, texture(tex, v_uv).r);
 }
-";
+\0";
 
-pub struct Renderer<'a> {
-    program: glium::Program,
-
-    cache: rusttype::gpu_cache::Cache<'a>,
-    cache_tex: glium::texture::Texture2d,
-    program_glyph: glium::Program,
+pub struct Renderer {
+    prog: GLuint,
 }
 
-impl<'a> Renderer<'a> {
-    pub fn new(display: &glium::Display, dpi_factor: f32) -> Renderer<'a> {
-        let program = program!(
-            display,
-            140 => {
-                vertex: VERT,
-                fragment: FRAG,
-            }).unwrap();
+fn shader(shader_src: &CStr, shader_type: GLenum) -> Result<GLuint, String> {
+    unsafe {
+        let shader: GLuint = gl::CreateShader(shader_type);
+        gl::ShaderSource(shader, 1, &shader_src.as_ptr(), std::ptr::null());
+        gl::CompileShader(shader);
 
-        let (cache_width, cache_height) = (512 * dpi_factor as u32, 512 * dpi_factor as u32);
-        let cache = rusttype::gpu_cache::Cache::builder()
-            .dimensions(cache_width, cache_height)
-            .build();
+        let mut valid: GLint = 1;
+        gl::GetShaderiv(shader, gl::COMPILE_STATUS, &mut valid);
+        if valid == 0 {
+            let mut len: GLint = 0;
+            gl::GetShaderiv(shader, gl::INFO_LOG_LENGTH, &mut len);
+            let error = CString::new(vec![' ' as u8; len as usize]).unwrap();
+            gl::GetShaderInfoLog(shader, len, std::ptr::null_mut(), error.as_ptr() as *mut GLchar);
+            return Err(error.into_string().unwrap());
+        }
 
-        let cache_tex = glium::texture::Texture2d::with_format(
-            display,
-            glium::texture::RawImage2d {
-                data: Cow::Owned(vec![128u8; cache_width as usize * cache_height as usize]),
-                width: cache_width,
-                height: cache_height,
-                format: glium::texture::ClientFormat::U8
-            },
-            glium::texture::UncompressedFloatFormat::U8,
-            glium::texture::MipmapsOption::NoMipmap).unwrap();
+        Ok(shader)
+    }
+}
 
-        let program_glyph = program!(
-            display,
-            140 => {
-                vertex: TEXT_VERT,
-                fragment: TEXT_FRAG,
-            }).unwrap();
+fn program(vert_src: &CStr, frag_src: &CStr) -> Result<GLuint, String> {
+    unsafe {
+        let vert = shader(vert_src, gl::VERTEX_SHADER).unwrap();
+        let frag = shader(frag_src, gl::FRAGMENT_SHADER).unwrap();
+        let prog = gl::CreateProgram();
+        gl::AttachShader(prog, vert);
+        gl::AttachShader(prog, frag);
+        gl::LinkProgram(prog);
+
+        let mut valid: GLint = 1;
+        gl::GetProgramiv(prog, gl::COMPILE_STATUS, &mut valid);
+        if valid == 0 {
+            let mut len: GLint = 0;
+            gl::GetProgramiv(prog, gl::INFO_LOG_LENGTH, &mut len);
+            let error = CString::new(vec![' ' as u8; len as usize]).unwrap();
+            gl::GetProgramInfoLog(prog, len, std::ptr::null_mut(), error.as_ptr() as *mut GLchar);
+            return Err(error.into_string().unwrap());
+        }
+
+        gl::DetachShader(prog, vert);
+        gl::DetachShader(prog, frag);
+
+        gl::DeleteShader(vert);
+        gl::DeleteShader(frag);
+
+        Ok(prog)
+    }
+}
+
+impl Renderer {
+    pub fn new() -> Renderer {
+        let prog: GLuint = program(
+            &CStr::from_bytes_with_nul(VERT).unwrap(),
+            &CStr::from_bytes_with_nul(FRAG).unwrap()).unwrap();
 
         Renderer {
-            program: program,
-
-            cache: cache,
-            cache_tex: cache_tex,
-            program_glyph: program_glyph,
+            prog,
         }
     }
 
-    pub fn render(&mut self, display: &glium::Display, cmds: &[Cmd<'a>]) {
-        let mut target = display.draw();
-        target.clear_color(0.01, 0.015, 0.02, 1.0);
+    pub fn draw(&mut self, vertices: &[Vertex], indices: &[u16]) {
+        unsafe {
+            let mut vbo: u32 = 0;
+            gl::GenBuffers(1, &mut vbo);
+            gl::BindBuffer(gl::ARRAY_BUFFER, vbo);
+            gl::BufferData(gl::ARRAY_BUFFER, (vertices.len() * std::mem::size_of::<Vertex>()) as isize, vertices.as_ptr() as *const std::ffi::c_void, gl::STATIC_DRAW);
 
-        for cmd in cmds {
-            match cmd {
-                Cmd::Draw { vertices, indices } => {
-                    self.draw(display, &mut target, vertices, indices);
-                }
-                Cmd::DrawGlyphs { glyphs } => {
-                    self.draw_glyphs(display, &mut target, glyphs);
-                }
-            }
+            let mut ibo: u32 = 0;
+            gl::GenBuffers(1, &mut ibo);
+            gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, ibo);
+            gl::BufferData(gl::ELEMENT_ARRAY_BUFFER, (indices.len() * std::mem::size_of::<u16>()) as isize, indices.as_ptr() as *const std::ffi::c_void, gl::STATIC_DRAW);
+
+            let mut vao: u32 = 0;
+            gl::GenVertexArrays(1, &mut vao);
+            gl::BindVertexArray(vao);
+            gl::BindBuffer(gl::ARRAY_BUFFER, vbo);
+            gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, ibo);
+
+            gl::EnableVertexAttribArray(0);
+            gl::VertexAttribPointer(0, 2, gl::FLOAT, gl::FALSE, std::mem::size_of::<Vertex>() as GLint, offset!(Vertex, pos) as *const gl::types::GLvoid);
+            gl::EnableVertexAttribArray(1);
+            gl::VertexAttribPointer(1, 4, gl::FLOAT, gl::FALSE, std::mem::size_of::<Vertex>() as GLint, offset!(Vertex, col) as *const gl::types::GLvoid);
+
+            gl::UseProgram(self.prog);
+
+            gl::DrawElements(gl::TRIANGLES, indices.len() as i32, gl::UNSIGNED_SHORT, 0 as *const gl::types::GLvoid);
+
+            gl::DeleteVertexArrays(1, &vao);
+            gl::DeleteBuffers(1, &ibo);
+            gl::DeleteBuffers(1, &vbo);
         }
-
-        target.finish().unwrap();
     }
 
-    fn draw(&self, display: &glium::Display, target: &mut glium::Frame, vertices: &[Vertex], indices: &[u16]) {
-        implement_vertex!(Vertex, pos, col);
+    pub fn draw_tex(&mut self, vertices: &[Vertex], indices: &[u16], tex_id: TexId) {
 
-        let vbo = glium::VertexBuffer::new(display, &vertices).unwrap();
-        let ibo = glium::IndexBuffer::new(display, glium::index::PrimitiveType::TrianglesList, &indices).unwrap();
-
-        target.draw(&vbo, &ibo,
-            &self.program,
-            &glium::uniforms::EmptyUniforms,
-            &glium::DrawParameters {
-                blend: glium::Blend::alpha_blending(),
-                ..Default::default()
-            }).unwrap();
-    }
-
-    fn draw_glyphs(&mut self, display: &glium::Display, target: &mut glium::Frame, glyphs: &[rusttype::PositionedGlyph<'a>]) {
-        let (screen_width, screen_height) = {
-            let (w, h) = display.get_framebuffer_dimensions();
-            (w as f32, h as f32)
-        };
-
-        for glyph in glyphs {
-            self.cache.queue_glyph(0, glyph.clone());
-        }
-        let cache_tex = &mut self.cache_tex;
-        self.cache.cache_queued(|rect, data| {
-            cache_tex.main_level().write(glium::Rect {
-                left: rect.min.x,
-                bottom: rect.min.y,
-                width: rect.width(),
-                height: rect.height()
-            }, glium::texture::RawImage2d {
-                data: Cow::Borrowed(data),
-                width: rect.width(),
-                height: rect.height(),
-                format: glium::texture::ClientFormat::U8
-            });
-        }).unwrap();
-
-        let uniforms = uniform! {
-            tex: self.cache_tex.sampled().magnify_filter(glium::uniforms::MagnifySamplerFilter::Nearest)
-        };
-
-        #[derive(Copy, Clone)]
-        struct Vertex {
-            pos: [f32; 2],
-            uv: [f32; 2],
-            col: [f32; 4]
-        }
-        implement_vertex!(Vertex, pos, uv, col);
-
-        let col = [1.0, 1.0, 1.0, 1.0];
-
-        let mut vertices = Vec::with_capacity(glyphs.len() * 4);
-        let mut indices = Vec::with_capacity(glyphs.len() * 6);
-        let mut vertex_i: u16 = 0;
-        for glyph in glyphs {
-            if let Ok(Some((uv_rect, screen_rect))) = self.cache.rect_for(0, glyph) {
-                let (x1,y1) = self.pixel_to_ndc(screen_rect.min.x as f32, screen_rect.min.y as f32, screen_width, screen_height);
-                let (x2,y2) = self.pixel_to_ndc(screen_rect.max.x as f32, screen_rect.max.y as f32, screen_width, screen_height);
-                vertices.push(Vertex { pos: [x1,y1], uv: [uv_rect.min.x, uv_rect.min.y], col });
-                vertices.push(Vertex { pos: [x1,y2], uv: [uv_rect.min.x, uv_rect.max.y], col });
-                vertices.push(Vertex { pos: [x2,y2], uv: [uv_rect.max.x, uv_rect.max.y], col });
-                vertices.push(Vertex { pos: [x2,y1], uv: [uv_rect.max.x, uv_rect.min.y], col });
-                indices.push(vertex_i);     indices.push(vertex_i + 1); indices.push(vertex_i + 2);
-                indices.push(vertex_i + 2); indices.push(vertex_i + 3); indices.push(vertex_i);
-            }
-            vertex_i += 4;
-        }
-        let vbo = glium::VertexBuffer::new(display, &vertices).unwrap();
-        let ibo = glium::IndexBuffer::new(display, glium::index::PrimitiveType::TrianglesList, &indices).unwrap();
-
-        target.draw(&vbo, &ibo,
-            &self.program_glyph, &uniforms,
-            &glium::DrawParameters {
-                blend: glium::Blend::alpha_blending(),
-                ..Default::default()
-            }).unwrap();
     }
 
     #[inline]
     fn pixel_to_ndc(&self, x: f32, y: f32, screen_width: f32, screen_height: f32) -> (f32, f32) {
         (2.0 * (x / screen_width as f32 - 0.5), 2.0 * (1.0 - y / screen_height as f32 - 0.5))
+    }
+}
+
+impl Drop for Renderer {
+    fn drop(&mut self) {
+        unsafe {
+            gl::DeleteProgram(self.prog);
+        }
     }
 }
