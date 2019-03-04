@@ -1,6 +1,6 @@
 mod render;
 mod ui;
-mod arena;
+mod alloc;
 
 use render::*;
 use ui::*;
