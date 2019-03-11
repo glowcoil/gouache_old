@@ -272,7 +272,6 @@ impl Renderer {
                 TexFormat::RGBA => { gl::UseProgram(self.prog_tex_rgba); }
                 TexFormat::A => { gl::UseProgram(self.prog_tex_a); }
             }
-            gl::UseProgram(self.prog_tex_a);
             gl::Uniform1i(0, 0);
 
             gl::DrawElements(gl::TRIANGLES, indices.len() as i32, gl::UNSIGNED_SHORT, 0 as *const gl::types::GLvoid);
@@ -295,11 +294,13 @@ impl Renderer {
             match format {
                 TexFormat::RGBA => {
                     assert!(pixels.len() == width * height * 4);
-                    gl::TexImage2D(gl::TEXTURE_2D, 0, gl::RGBA as GLint, width as i32, height as i32, 0, gl::RGBA, gl::UNSIGNED_INT_8_8_8_8, pixels.as_ptr() as *const std::ffi::c_void);
+                    gl::PixelStorei(gl::UNPACK_ALIGNMENT, 4);
+                    gl::TexImage2D(gl::TEXTURE_2D, 0, gl::RGBA32UI as GLint, width as i32, height as i32, 0, gl::RGBA, gl::UNSIGNED_INT_8_8_8_8, pixels.as_ptr() as *const std::ffi::c_void);
                 }
                 TexFormat::A => {
                     assert!(pixels.len() == width * height);
-                    gl::TexImage2D(gl::TEXTURE_2D, 0, gl::RED as GLint, width as i32, height as i32, 0, gl::RED, gl::UNSIGNED_BYTE, pixels.as_ptr() as *const std::ffi::c_void);
+                    gl::PixelStorei(gl::UNPACK_ALIGNMENT, 1);
+                    gl::TexImage2D(gl::TEXTURE_2D, 0, gl::R8 as GLint, width as i32, height as i32, 0, gl::RED, gl::UNSIGNED_BYTE, pixels.as_ptr() as *const std::ffi::c_void);
                 }
             }
             gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::NEAREST as i32);
@@ -315,12 +316,14 @@ impl Renderer {
             TexFormat::RGBA => {
                 if pixels.len() != width * height * 4 { panic!() }
                 unsafe {
+                    gl::PixelStorei(gl::UNPACK_ALIGNMENT, 4);
                     gl::TexSubImage2D(gl::TEXTURE_2D, 0, x as i32, y as i32, width as i32, height as i32, gl::RGBA, gl::UNSIGNED_INT_8_8_8_8, pixels.as_ptr() as *const std::ffi::c_void);
                 }
             }
             TexFormat::A => {
                 if pixels.len() != width * height { panic!() }
                 unsafe {
+                    gl::PixelStorei(gl::UNPACK_ALIGNMENT, 1);
                     gl::TexSubImage2D(gl::TEXTURE_2D, 0, x as i32, y as i32, width as i32, height as i32, gl::RED, gl::UNSIGNED_BYTE, pixels.as_ptr() as *const std::ffi::c_void);
                 }
             }
