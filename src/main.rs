@@ -44,7 +44,7 @@ fn main() {
     let atlas_tex = renderer.create_tex(TexFormat::A, 128, 128, &[0; 128*128]);
     for c in "qwertyuiopasdfghjklzxcvbnm1234567890`~!@#$%^&*()_+-={{}}[]\\|,./<>?".chars() {
         let glyph_id = font.lookup_glyph_id(c as u32).unwrap();
-        let bbox = font.get_bbox(glyph_id, 20).unwrap();
+        let bbox = font.get_bbox(glyph_id, 16).unwrap();
         let rect = atlas.insert(glyph_id, bbox.width() as u32, bbox.height() as u32).unwrap();
         let glyph = font.render_glyph(glyph_id, 16).unwrap();
         renderer.update_tex(atlas_tex, rect.x as usize, rect.y as usize, glyph.width as usize, glyph.height as usize, &glyph.data);
@@ -124,53 +124,46 @@ fn main() {
 
 type GlyphId = u16;
 
-#[derive(Debug)]
 struct Atlas {
     width: u32,
     height: u32,
-    nodes: alloc::Slab<Node>,
+    rows: alloc::Slab<Row>,
+    rows_by_height: Vec<usize>,
+    next_y: u32,
     map: std::collections::HashMap<GlyphId, Entry>,
     counter: usize,
 }
 
+struct Row {
+    y: u32,
+    height: u32,
+    glyphs: alloc::Slab<Glyph>,
+    next_x: u32,
+}
+
+#[derive(Debug)]
+struct Glyph {
+    x: u32,
+    width: u32,
+    height: u32,
+    last_used: usize,
+    glyph_id: GlyphId,
+}
+
 #[derive(Debug)]
 struct Entry {
-    id: usize,
-    rect: Rect,
-}
-
-#[derive(Debug)]
-struct Node {
-    age: usize,
-    avg_age: f32,
-    contents: Contents,
-    parent: Option<usize>,
-}
-
-#[derive(Copy, Clone, Debug)]
-enum Axis { X, Y }
-
-#[derive(Debug)]
-enum Contents {
-    Branch {
-        axis: Axis,
-        split: u32,
-        extent: u32,
-        fst: usize,
-        snd: usize,
-    },
-    Leaf { id: GlyphId },
-    Empty,
+    row: usize,
+    glyph: usize,
 }
 
 impl Atlas {
     fn new(width: u32, height: u32) -> Atlas {
-        let mut nodes = alloc::Slab::new();
-        nodes.insert(Node { age: 0, avg_age: 0.0, contents: Contents::Empty, parent: None });
         Atlas {
             width,
             height,
-            nodes,
+            rows: alloc::Slab::new(),
+            rows_by_height: Vec::new(),
+            next_y: 0,
             map: std::collections::HashMap::new(),
             counter: 0,
         }
@@ -180,111 +173,82 @@ impl Atlas {
         self.counter += 1;
     }
 
-    fn get_cached(&mut self, glyph: GlyphId) -> Option<Rect> {
-        if let Some(&Entry { id, rect }) = self.map.get(&glyph) {
-            self.mark_used(id);
-            Some(rect)
+    fn get_cached(&mut self, glyph_id: GlyphId) -> Option<Rect> {
+        if let Some(&Entry { row, glyph }) = self.map.get(&glyph_id) {
+            let row = self.rows.get_mut(row).unwrap();
+            let glyph = row.glyphs.get_mut(glyph).unwrap();
+            glyph.last_used = self.counter;
+            Some(Rect { x: glyph.x, y: row.y, w: glyph.width, h: glyph.height })
         } else {
             None
         }
     }
 
-    fn insert(&mut self, glyph: GlyphId, width: u32, height: u32) -> Option<Rect> {
-        self.insert_inner(glyph, width, height, 0, Rect { x: 0, y: 0, w: self.width, h: self.height })
+    fn insert(&mut self, glyph_id: GlyphId, width: u32, height: u32) -> Option<Rect> {
+        if width > self.width || height > self.height { return None; }
+
+        let row_index = self.find_row(width, height);
+        if row_index.is_none() { return None; }
+        let row_index = row_index.unwrap();
+
+        let mut row = self.rows.get_mut(row_index).unwrap();
+        let x = row.next_x;
+        let glyph = row.glyphs.insert(Glyph {
+            x,
+            width,
+            height,
+            last_used: self.counter,
+            glyph_id,
+        });
+        row.next_x += width;
+
+        self.map.insert(glyph_id, Entry { row: row_index, glyph });
+
+        Some(Rect { x, y: row.y, w: width, h: height })
     }
 
-    fn insert_inner(&mut self, glyph: GlyphId, width: u32, height: u32, index: usize, rect: Rect) -> Option<Rect> {
-        println!("{} {:?}", index, rect);
-        if width > rect.w || height > rect.h { return None }
-
-        if let Contents::Branch { axis, split, extent, fst, snd } = self.nodes.get(index).unwrap().contents {
-            let (fst_rect, snd_rect) = match axis {
-                Axis::X => (Rect { w: split, ..rect }, Rect { x: rect.x + split, w: extent - split, ..rect }),
-                Axis::Y => (Rect { h: split, ..rect }, Rect { y: rect.y + split, h: extent - split, ..rect }),
-            };
-
-            let (fst, fst_rect, snd, snd_rect) = if self.nodes.get(fst).unwrap().avg_age <= self.nodes.get(snd).unwrap().avg_age {
-                (fst, fst_rect, snd, snd_rect)
-            } else {
-                (snd, snd_rect, fst, fst_rect)
-            };
-
-            let fst_result = self.insert_inner(glyph, width, height, fst, fst_rect);
-            if fst_result.is_some() { return fst_result }
-
-            let snd_result = self.insert_inner(glyph, width, height, snd, snd_rect);
-            if snd_result.is_some() { return snd_result }
+    fn find_row(&mut self, width: u32, height: u32) -> Option<usize> {
+        let row_height = nearest_pow_2(height);
+        // this logic is to ensure that the search finds the first of a sequence of equal elements
+        let index = self.rows_by_height
+            .binary_search_by_key(&(2 * row_height - 1), |row| 2 * self.rows.get(*row).unwrap().height)
+            .unwrap_err();
+        // if there is no exact match, try to add a tightly sized row
+        if let Some(row_index) = self.rows_by_height.get(index) {
+            if row_height != self.rows.get(*row_index).unwrap().height {
+                if let Some(new_row_index) = self.try_add_row(index, row_height) {
+                    return Some(new_row_index);
+                }
+            }
         }
+        // search rows for room starting at tightest fit
+        let heights: Vec<u32> = self.rows_by_height.iter().map(|i|self.rows.get(*i).unwrap().height).collect();
+        for i in index..self.rows_by_height.len() {
+            if width <= self.width - self.rows.get(self.rows_by_height[i]).unwrap().next_x {
+                return Some(self.rows_by_height[i]);
+            }
+        }
+        // if we ran out of rows, try to add a new row
+        if let Some(row_index) = self.try_add_row(index, row_height) {
+            return Some(row_index);
+        }
+        // need to overwrite some rows
+        None
+    }
 
-        if self.nodes.get(index).unwrap().age == self.counter { 
-            println!("too new {}", self.nodes.get(index).unwrap().age);
+    fn try_add_row(&mut self, index: usize, row_height: u32) -> Option<usize> {
+        if row_height <= self.height - self.next_y {
+            let row_index = self.rows.insert(Row {
+                y: self.next_y,
+                height: row_height,
+                glyphs: alloc::Slab::new(),
+                next_x: 0,
+            });
+            self.next_y += row_height;
+            self.rows_by_height.insert(index, row_index);
+            Some(row_index)
+        } else {
             None
-        } else {
-            println!("found a place: {:?}", rect);
-            Some(self.place(glyph, width, height, index, rect))
-        }
-    }
-
-    fn place(&mut self, glyph: GlyphId, width: u32, height: u32, index: usize, rect: Rect) -> Rect {
-        self.cleanup(index);
-
-        let (axis_1, split_1, extent_1, axis_2, split_2, extent_2) = if rect.h - height > rect.w - width {
-            (Axis::Y, height, rect.h, Axis::X, width, rect.w)
-        } else {
-            (Axis::X, width, rect.w, Axis::Y, height, rect.h)
-        };
-        let split_1 = nearest_pow_2(split_1).min(extent_1);
-        let split_2 = nearest_pow_2(split_2).min(extent_2);
-
-        let fst_1 = self.nodes.insert(Node { age: 0, avg_age: 0.0, contents: Contents::Empty, parent: Some(index) });
-        let snd_1 = self.nodes.insert(Node { age: 0, avg_age: 0.0, contents: Contents::Empty, parent: Some(index) });
-        let fst_2 = self.nodes.insert(Node { age: 0, avg_age: 0.0, contents: Contents::Leaf { id: glyph }, parent: Some(fst_1) });
-        let snd_2 = self.nodes.insert(Node { age: 0, avg_age: 0.0, contents: Contents::Empty, parent: Some(fst_1) });
-        self.nodes.get_mut(index).unwrap().contents = Contents::Branch {
-            axis: axis_1, split: split_1, extent: extent_1, fst: fst_1, snd: snd_1
-        };
-        self.nodes.get_mut(fst_1).unwrap().contents = Contents::Branch {
-            axis: axis_2, split: split_2, extent: extent_2, fst: fst_2, snd: snd_2
-        };
-
-        self.mark_used(fst_2);
-
-        self.map.insert(glyph, Entry { id: index, rect });
-
-        Rect { x: rect.x, y: rect.y, w: width, h: height }
-    }
-
-    fn cleanup(&mut self, index: usize) {
-        match self.nodes.get(index).unwrap().contents {
-            Contents::Branch { fst, snd, .. } => {
-                self.cleanup(fst);
-                self.cleanup(snd);
-            }
-            Contents::Leaf { id } => {
-                self.map.remove(&id);
-            }
-            _ => {}
-        }
-    }
-
-    fn mark_used(&mut self, mut index: usize) {
-        let node = self.nodes.get_mut(index).unwrap();
-        node.age = self.counter;
-        node.avg_age = self.counter as f32;
-
-        while let Some(parent) = self.nodes.get(index).unwrap().parent {
-            index = parent;
-            if let Contents::Branch { axis, split, extent, fst, snd } = self.nodes.get(index).unwrap().contents {
-                let avg_age =
-                    self.nodes.get(fst).unwrap().avg_age * (split as f32 / extent as f32) +
-                    self.nodes.get(snd).unwrap().avg_age * ((extent - split) as f32 / extent as f32);
-
-                let node = self.nodes.get_mut(index).unwrap();
-                node.age = self.counter;
-                node.avg_age = avg_age;
-            } else {
-                unreachable!()
-            }
         }
     }
 }
