@@ -25,9 +25,6 @@ fn main() {
 
     let dpi_factor = gl_window.get_hidpi_factor();
     let mut renderer = Renderer::new();
-    // let mut ui = UI::new();
-
-    // let font = rusttype::FontCollection::from_bytes(include_bytes!("../sawarabi-gothic-medium.ttf") as &[u8]).unwrap().into_font().unwrap();
 
     let tex = renderer.create_tex(TexFormat::A, 4, 4, &[
         255, 127, 255, 127,
@@ -40,16 +37,14 @@ fn main() {
     let font = font_rs::font::parse(include_bytes!("../HelveticaNeue.ttf")).unwrap();
     let mut atlas = Atlas::new(128, 128);
     atlas.update_counter();
-    atlas.update_counter();
     let atlas_tex = renderer.create_tex(TexFormat::A, 128, 128, &[0; 128*128]);
-    for c in "qwertyuiopasdfghjklzxcvbnm1234567890`~!@#$%^&*()_+-={{}}[]\\|,./<>?".chars() {
+    for c in "qwertayuiopasdfghjklzxcvbnm1234567890`~!@#$%^&*()_+-={{}}[]\\|,./<>?".chars() {
         let glyph_id = font.lookup_glyph_id(c as u32).unwrap();
         let bbox = font.get_bbox(glyph_id, 16).unwrap();
         let rect = atlas.insert(glyph_id, bbox.width() as u32, bbox.height() as u32).unwrap();
         let glyph = font.render_glyph(glyph_id, 16).unwrap();
         renderer.update_tex(atlas_tex, rect.x as usize, rect.y as usize, glyph.width as usize, glyph.height as usize, &glyph.data);
     }
-
 
     const FRAME: std::time::Duration = std::time::Duration::from_micros(1_000_000 / 60);
     let mut frames: [u32; 100] = [0; 100];
@@ -139,6 +134,7 @@ struct Row {
     height: u32,
     glyphs: alloc::Slab<Glyph>,
     next_x: u32,
+    last_used: usize,
 }
 
 #[derive(Debug)]
@@ -146,7 +142,6 @@ struct Glyph {
     x: u32,
     width: u32,
     height: u32,
-    last_used: usize,
     glyph_id: GlyphId,
 }
 
@@ -176,8 +171,8 @@ impl Atlas {
     fn get_cached(&mut self, glyph_id: GlyphId) -> Option<Rect> {
         if let Some(&Entry { row, glyph }) = self.map.get(&glyph_id) {
             let row = self.rows.get_mut(row).unwrap();
+            row.last_used = self.counter;
             let glyph = row.glyphs.get_mut(glyph).unwrap();
-            glyph.last_used = self.counter;
             Some(Rect { x: glyph.x, y: row.y, w: glyph.width, h: glyph.height })
         } else {
             None
@@ -197,10 +192,10 @@ impl Atlas {
             x,
             width,
             height,
-            last_used: self.counter,
             glyph_id,
         });
         row.next_x += width;
+        row.last_used = self.counter;
 
         self.map.insert(glyph_id, Entry { row: row_index, glyph });
 
@@ -210,19 +205,21 @@ impl Atlas {
     fn find_row(&mut self, width: u32, height: u32) -> Option<usize> {
         let row_height = nearest_pow_2(height);
         // this logic is to ensure that the search finds the first of a sequence of equal elements
-        let index = self.rows_by_height
+        let mut index = self.rows_by_height
             .binary_search_by_key(&(2 * row_height - 1), |row| 2 * self.rows.get(*row).unwrap().height)
             .unwrap_err();
-        // if there is no exact match, try to add a tightly sized row
-        if let Some(row_index) = self.rows_by_height.get(index) {
-            if row_height != self.rows.get(*row_index).unwrap().height {
-                if let Some(new_row_index) = self.try_add_row(index, row_height) {
-                    return Some(new_row_index);
-                }
+        // try to find an existing tightly sized row
+        while index < self.rows_by_height.len() && row_height == self.rows.get(self.rows_by_height[index]).unwrap().height {
+            if width <= self.width - self.rows.get(self.rows_by_height[index]).unwrap().next_x {
+                return Some(self.rows_by_height[index]);
             }
+            index += 1;
+        }
+        // if there is no exact match, try to add a tightly sized row
+        if let Some(new_row_index) = self.try_add_row(index, row_height) {
+            return Some(new_row_index);
         }
         // search rows for room starting at tightest fit
-        let heights: Vec<u32> = self.rows_by_height.iter().map(|i|self.rows.get(*i).unwrap().height).collect();
         for i in index..self.rows_by_height.len() {
             if width <= self.width - self.rows.get(self.rows_by_height[i]).unwrap().next_x {
                 return Some(self.rows_by_height[i]);
@@ -233,6 +230,9 @@ impl Atlas {
             return Some(row_index);
         }
         // need to overwrite some rows
+        if let Some(row_index) = self.try_overwrite_rows(row_height) {
+            return Some(row_index);
+        }
         None
     }
 
@@ -243,8 +243,63 @@ impl Atlas {
                 height: row_height,
                 glyphs: alloc::Slab::new(),
                 next_x: 0,
+                last_used: 0,
             });
             self.next_y += row_height;
+            self.rows_by_height.insert(index, row_index);
+            Some(row_index)
+        } else {
+            None
+        }
+    }
+
+    fn try_overwrite_rows(&mut self, row_height: u32) -> Option<usize> {
+        let mut rows_by_y = self.rows_by_height.clone();
+        rows_by_y.sort_by_key(|row| self.rows.get(*row).unwrap().y);
+        let mut best_i = 0;
+        let mut best_height = 0;
+        let mut best_num_rows = 0;
+        let mut best_last_used = self.counter as f32;
+        'row: for i in 0..rows_by_y.len() {
+            let mut num_rows = 0;
+            let mut rows_height = 0;
+            let mut last_used_sum = 0;
+            while row_height > rows_height && i + num_rows < rows_by_y.len() {
+                let row = self.rows.get(rows_by_y[i]).unwrap();
+                if row.last_used == self.counter { continue 'row; }
+                num_rows += 1;
+                rows_height += row.height;
+                last_used_sum += row.last_used;
+            }
+            if row_height <= rows_height {
+                let last_used_avg = last_used_sum as f32 / num_rows as f32;
+                if last_used_avg < best_last_used {
+                    best_i = i;
+                    best_height = rows_height;
+                    best_num_rows = num_rows;
+                    best_last_used = last_used_avg;
+                }
+            }
+        }
+        if best_height > 0 {
+            let y = self.rows.get(rows_by_y[best_i]).unwrap().y;
+            for row_index in &rows_by_y[best_i..(best_i + best_num_rows)] {
+                self.rows_by_height.remove(*row_index);
+                let row = self.rows.remove(*row_index).unwrap();
+                for glyph in row.glyphs.iter() {
+                    self.map.remove(&glyph.glyph_id);
+                }
+            }
+            let row_index = self.rows.insert(Row {
+                y,
+                height: best_height,
+                glyphs: alloc::Slab::new(),
+                next_x: 0,
+                last_used: 0,
+            });
+            let index = self.rows_by_height
+                .binary_search_by_key(&best_height, |row| self.rows.get(*row).unwrap().height)
+                .unwrap_or_else(|i| i);
             self.rows_by_height.insert(index, row_index);
             Some(row_index)
         } else {
