@@ -100,7 +100,7 @@ impl<'a> Paint<'a> {
             if let Some(bbox) = font.get_bbox(glyph, scale) {
                 self.graphics.glyphs.push(Glyph {
                     id: GlyphId { font: font_id, scale, glyph },
-                    pos: [pos[0] + h_metrics.left_side_bearing / 400.0, pos[1] - bbox.b as f32 / 300.0, pos[2]],
+                    pos: [pos[0] + bbox.l as f32 / 400.0, pos[1] - bbox.b as f32 / 300.0, pos[2]],
                 });
             }
             pos[0] += h_metrics.advance_width / 400.0;
