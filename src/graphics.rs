@@ -143,6 +143,12 @@ struct Row {
     last_used: usize,
 }
 
+impl Row {
+    fn new(y: u32, height: u32) -> Row {
+        Row { y, height, glyphs: alloc::Slab::new(), next_x: 0, last_used: 0 }
+    }
+}
+
 #[derive(Debug)]
 struct AtlasGlyph {
     x: u32,
@@ -244,13 +250,7 @@ impl Atlas {
 
     fn try_add_row(&mut self, index: usize, row_height: u32) -> Option<usize> {
         if row_height <= self.height - self.next_y {
-            let row_index = self.rows.insert(Row {
-                y: self.next_y,
-                height: row_height,
-                glyphs: alloc::Slab::new(),
-                next_x: 0,
-                last_used: 0,
-            });
+            let row_index = self.rows.insert(Row::new(self.next_y, row_height));
             self.next_y += row_height;
             self.rows_by_height.insert(index, row_index);
             Some(row_index)
@@ -272,7 +272,7 @@ impl Atlas {
             let mut last_used_sum = 0;
             while row_height > rows_height && i + num_rows < rows_by_y.len() {
                 let row = self.rows.get(rows_by_y[i]).unwrap();
-                // if row.last_used == self.counter { continue; }
+                if row.last_used == self.counter { continue; }
                 num_rows += 1;
                 rows_height += row.height;
                 last_used_sum += row.last_used;
@@ -296,21 +296,24 @@ impl Atlas {
                     self.map.remove(&glyph.glyph_id);
                 }
             }
-            let row_index = self.rows.insert(Row {
-                y,
-                height: best_height,
-                glyphs: alloc::Slab::new(),
-                next_x: 0,
-                last_used: 0,
-            });
-            let index = self.rows_by_height
-                .binary_search_by_key(&best_height, |row| self.rows.get(*row).unwrap().height)
-                .unwrap_or_else(|i| i);
-            self.rows_by_height.insert(index, row_index);
+            let row_index = self.add_row(Row::new(y, row_height));
+            if best_height > row_height {
+                self.add_row(Row::new(y + row_height, best_height - row_height));
+            }
             Some(row_index)
         } else {
             None
         }
+    }
+
+    fn add_row(&mut self, row: Row) -> usize {
+        let height = row.height;
+        let row_index = self.rows.insert(row);
+        let index = self.rows_by_height
+            .binary_search_by_key(&height, |row| self.rows.get(*row).unwrap().height)
+            .unwrap_or_else(|i| i);
+        self.rows_by_height.insert(index, row_index);
+        row_index
     }
 }
 
