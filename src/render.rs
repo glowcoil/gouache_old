@@ -287,20 +287,21 @@ impl Renderer {
     }
 
     pub fn create_tex(&mut self, format: TexFormat, width: usize, height: usize, pixels: &[u8]) -> TexId {
+        let flipped = flip(pixels, width);
         let mut tex: GLuint = 0;
         unsafe {
             gl::GenTextures(1, &mut tex);
             gl::BindTexture(gl::TEXTURE_2D, tex);
             match format {
                 TexFormat::RGBA => {
-                    assert!(pixels.len() == width * height * 4);
+                    assert!(flipped.len() == width * height * 4);
                     gl::PixelStorei(gl::UNPACK_ALIGNMENT, 4);
-                    gl::TexImage2D(gl::TEXTURE_2D, 0, gl::RGBA32UI as GLint, width as i32, height as i32, 0, gl::RGBA, gl::UNSIGNED_INT_8_8_8_8, pixels.as_ptr() as *const std::ffi::c_void);
+                    gl::TexImage2D(gl::TEXTURE_2D, 0, gl::RGBA32UI as GLint, width as i32, height as i32, 0, gl::RGBA, gl::UNSIGNED_INT_8_8_8_8, flipped.as_ptr() as *const std::ffi::c_void);
                 }
                 TexFormat::A => {
-                    assert!(pixels.len() == width * height);
+                    assert!(flipped.len() == width * height);
                     gl::PixelStorei(gl::UNPACK_ALIGNMENT, 1);
-                    gl::TexImage2D(gl::TEXTURE_2D, 0, gl::R8 as GLint, width as i32, height as i32, 0, gl::RED, gl::UNSIGNED_BYTE, pixels.as_ptr() as *const std::ffi::c_void);
+                    gl::TexImage2D(gl::TEXTURE_2D, 0, gl::R8 as GLint, width as i32, height as i32, 0, gl::RED, gl::UNSIGNED_BYTE, flipped.as_ptr() as *const std::ffi::c_void);
                 }
             }
             gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::NEAREST as i32);
@@ -310,21 +311,22 @@ impl Renderer {
     }
 
     pub fn update_tex(&mut self, texture: TexId, x: usize, y: usize, width: usize, height: usize, pixels: &[u8]) {
+        let flipped = flip(pixels, width);
         let Texture { format, tex } = self.textures.get(texture).unwrap();
         unsafe { gl::BindTexture(gl::TEXTURE_2D, *tex); }
         match format {
             TexFormat::RGBA => {
-                if pixels.len() != width * height * 4 { panic!() }
+                if flipped.len() != width * height * 4 { panic!() }
                 unsafe {
                     gl::PixelStorei(gl::UNPACK_ALIGNMENT, 4);
-                    gl::TexSubImage2D(gl::TEXTURE_2D, 0, x as i32, y as i32, width as i32, height as i32, gl::RGBA, gl::UNSIGNED_INT_8_8_8_8, pixels.as_ptr() as *const std::ffi::c_void);
+                    gl::TexSubImage2D(gl::TEXTURE_2D, 0, x as i32, y as i32, width as i32, height as i32, gl::RGBA, gl::UNSIGNED_INT_8_8_8_8, flipped.as_ptr() as *const std::ffi::c_void);
                 }
             }
             TexFormat::A => {
-                if pixels.len() != width * height { panic!() }
+                if flipped.len() != width * height { panic!() }
                 unsafe {
                     gl::PixelStorei(gl::UNPACK_ALIGNMENT, 1);
-                    gl::TexSubImage2D(gl::TEXTURE_2D, 0, x as i32, y as i32, width as i32, height as i32, gl::RED, gl::UNSIGNED_BYTE, pixels.as_ptr() as *const std::ffi::c_void);
+                    gl::TexSubImage2D(gl::TEXTURE_2D, 0, x as i32, y as i32, width as i32, height as i32, gl::RED, gl::UNSIGNED_BYTE, flipped.as_ptr() as *const std::ffi::c_void);
                 }
             }
         }
@@ -355,4 +357,12 @@ impl Drop for Renderer {
 #[inline]
 fn pixel_to_ndc(x: f32, y: f32, screen_width: f32, screen_height: f32) -> (f32, f32) {
     (2.0 * (x / screen_width as f32 - 0.5), 2.0 * (1.0 - y / screen_height as f32 - 0.5))
+}
+
+fn flip(pixels: &[u8], width: usize) -> Vec<u8> {
+    let mut flipped: Vec<u8> = Vec::with_capacity(pixels.len());
+    for chunk in pixels.rchunks(width) {
+        flipped.extend(chunk);
+    }
+    flipped
 }
