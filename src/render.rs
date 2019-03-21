@@ -11,10 +11,6 @@ macro_rules! offset {
     ($type:ty, $field:ident) => { &(*(0 as *const $type)).$field as *const _ as usize }
 }
 
-trait VertexAttribs {
-    fn attribs();
-}
-
 #[derive(Copy, Clone)]
 pub struct Vertex {
     pub pos: [f32; 3],
