@@ -30,7 +30,7 @@ impl Graphics {
         self.fonts.remove(font);
     }
 
-    pub fn draw(&mut self) {
+    pub fn draw(&mut self, screen_width: f32, screen_height: f32, dpi_factor: f32) {
         let mut glyph_verts: Vec<VertexUV> = Vec::new();
         let mut glyph_indices: Vec<u16> = Vec::new();
         self.atlas.update_counter();
@@ -48,26 +48,26 @@ impl Graphics {
             };
 
             let i = glyph_verts.len() as u16;
-            let x1 = rect.x as f32 / self.atlas.width as f32;
-            let x2 = (rect.x + rect.w) as f32 / self.atlas.width as f32;
-            let y1 = rect.y as f32 / self.atlas.width as f32;
-            let y2 = (rect.y + rect.h) as f32 / self.atlas.height as f32;
+            let (u1, v1) = (rect.x as f32 / self.atlas.width as f32, (rect.y + rect.h) as f32 / self.atlas.height as f32);
+            let (u2, v2) = ((rect.x + rect.w) as f32 / self.atlas.width as f32, rect.y as f32 / self.atlas.height as f32);
+            let (x1, y1) = pixel_to_ndc(glyph.pos[0], glyph.pos[1], screen_width, screen_height);
+            let (x2, y2) = pixel_to_ndc(glyph.pos[0] + rect.w as f32, glyph.pos[1] + rect.h as f32, screen_width, screen_height);
             glyph_verts.extend(&[VertexUV {
-                pos: [glyph.pos[0], glyph.pos[1], glyph.pos[2]],
+                pos: [x1, y1, glyph.pos[2]],
                 col: [1.0, 1.0, 1.0, 1.0],
-                uv: [x1, y1],
+                uv: [u1, v1],
             }, VertexUV {
-                pos: [glyph.pos[0] + rect.w as f32 / 400.0, glyph.pos[1], glyph.pos[2]],
+                pos: [x2, y1, glyph.pos[2]],
                 col: [1.0, 1.0, 1.0, 1.0],
-                uv: [x2, y1],
+                uv: [u2, v1],
             }, VertexUV {
-                pos: [glyph.pos[0] + rect.w as f32 / 400.0, glyph.pos[1] + rect.h as f32 / 300.0, glyph.pos[2]],
+                pos: [x2, y2, glyph.pos[2]],
                 col: [1.0, 1.0, 1.0, 1.0],
-                uv: [x2, y2],
+                uv: [u2, v2],
             }, VertexUV {
-                pos: [glyph.pos[0], glyph.pos[1] + rect.h as f32 / 300.0, glyph.pos[2]],
+                pos: [x1, y2, glyph.pos[2]],
                 col: [1.0, 1.0, 1.0, 1.0],
-                uv: [x1, y2],
+                uv: [u1, v2],
             }]);
             glyph_indices.extend(&[i, i+1, i+2, i, i+2, i+3]);
         }
@@ -79,6 +79,11 @@ impl Graphics {
             graphics: self,
         }
     }
+}
+
+#[inline]
+fn pixel_to_ndc(x: f32, y: f32, screen_width: f32, screen_height: f32) -> (f32, f32) {
+    (2.0 * (x / screen_width as f32 - 0.5), 2.0 * (1.0 - y / screen_height as f32 - 0.5))
 }
 
 pub struct Paint<'a> {
@@ -100,10 +105,10 @@ impl<'a> Paint<'a> {
             if let Some(bbox) = font.get_bbox(glyph, scale) {
                 self.graphics.glyphs.push(Glyph {
                     id: GlyphId { font: font_id, scale, glyph },
-                    pos: [pos[0] + bbox.l as f32 / 400.0, pos[1] - bbox.b as f32 / 300.0, pos[2]],
+                    pos: [pos[0] + bbox.l as f32, pos[1] + bbox.t as f32, pos[2]],
                 });
             }
-            pos[0] += h_metrics.advance_width / 400.0;
+            pos[0] += h_metrics.advance_width;
         }
     }
 }

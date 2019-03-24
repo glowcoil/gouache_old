@@ -350,11 +350,6 @@ impl Drop for Renderer {
     }
 }
 
-#[inline]
-fn pixel_to_ndc(x: f32, y: f32, screen_width: f32, screen_height: f32) -> (f32, f32) {
-    (2.0 * (x / screen_width as f32 - 0.5), 2.0 * (1.0 - y / screen_height as f32 - 0.5))
-}
-
 fn flip(pixels: &[u8], width: usize) -> Vec<u8> {
     let mut flipped: Vec<u8> = Vec::with_capacity(pixels.len());
     for chunk in pixels.rchunks(width) {

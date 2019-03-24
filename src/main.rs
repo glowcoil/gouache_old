@@ -17,7 +17,7 @@ fn main() {
     let mut events_loop = glutin::EventsLoop::new();
     let window = glutin::WindowBuilder::new()
         .with_dimensions(glutin::dpi::LogicalSize::new(800.0, 600.0))
-        .with_title("justitracker");
+        .with_title("gouache");
     let context = glutin::ContextBuilder::new()
         .with_srgb(true);
     let gl_window = glutin::GlWindow::new(window, context, &events_loop).unwrap();
@@ -52,8 +52,10 @@ fn main() {
         }
 
         {
-            graphics.paint().text([0.0, 0.0, 0.0], "Jackdaws love my big sphinx of quartz.", font, 16);
-            graphics.draw();
+            graphics.paint().text([0.0, 10.0, 0.0], "Jackdaws love my big sphinx of quartz.", font, 14);
+            graphics.paint().curve();
+            let size = gl_window.get_inner_size().unwrap();
+            graphics.draw(size.width as f32, size.height as f32, dpi_factor as f32);
         }
 
         gl_window.swap_buffers().unwrap();
