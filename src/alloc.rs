@@ -1,19 +1,21 @@
 use std::mem;
+use std::cell::UnsafeCell;
 
 pub struct Arena {
-    data: Vec<Vec<u8>>,
+    data: UnsafeCell<Vec<Vec<u8>>>,
 }
 
 impl Arena {
     pub fn with_capacity(capacity: usize) -> Arena {
         Arena {
-            data: vec![Vec::with_capacity(capacity)],
+            data: UnsafeCell::new(vec![Vec::with_capacity(capacity)]),
         }
     }
 
-    fn alloc_bytes(&mut self, bytes: usize, align: usize) -> *mut u8 {
+    fn alloc_bytes(&self, bytes: usize, align: usize) -> *mut u8 {
+        let mut data = unsafe { &mut *self.data.get() };
         let (ptr, len, capacity) = {
-            let last = &self.data.last().unwrap();
+            let last = &data.last().unwrap();
             let len = last.len();
             (last.as_ptr() as usize + len, len, last.capacity())
         };
@@ -21,24 +23,24 @@ impl Arena {
 
         if len + offset + bytes > capacity {
             let size = capacity.max(bytes);
-            self.data.push(Vec::with_capacity(size.saturating_add(size)));
+            data.push(Vec::with_capacity(size.saturating_add(size)));
         }
 
-        let last = &mut self.data.last_mut().unwrap();
+        let last = &mut data.last_mut().unwrap();
         unsafe {
             last.set_len(len + offset + bytes);
             last.as_mut_ptr().offset((len + offset) as isize)
         }
     }
 
-    pub fn alloc<'a, T: Copy>(&mut self, value: T) -> &'a mut T where Self: 'a {
+    pub fn alloc<'a, T: Copy>(&'a self, value: T) -> &'a mut T {
         let ptr = self.alloc_bytes(mem::size_of::<T>(), mem::align_of::<T>());
         let result: &'a mut T = unsafe { &mut *(ptr as *mut T) };
         *result = value;
         result
     }
 
-    pub fn alloc_slice<'a, T: Copy>(&mut self, values: &[T]) -> &'a mut [T] where Self: 'a {
+    pub fn alloc_slice<'a, T: Copy>(&'a self, values: &[T]) -> &'a mut [T] {
         let ptr = self.alloc_bytes(mem::size_of::<T>() * values.len(), mem::align_of::<T>());
         let result: &'a mut [T] = unsafe { std::slice::from_raw_parts_mut(ptr as *mut T, values.len()) };
         result.copy_from_slice(values);
