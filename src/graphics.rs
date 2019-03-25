@@ -149,8 +149,8 @@ pub struct Glyph {
 }
 
 enum PathSegment {
-    Line { x: f32, y: f32 },
-    Arc { x: f32, y: f32, r: f32 },
+    Line { to: [f32; 2] },
+    Arc { to: [f32; 2], r: f32 },
 }
 
 pub struct Frame {
@@ -167,6 +167,41 @@ impl Frame {
     pub fn glyphs<'a>(&'a self, glyphs: &[Glyph]) -> &'a Scene {
         let glyphs = self.arena.alloc_slice(glyphs);
         self.arena.alloc(Scene::Glyphs(glyphs))
+    }
+
+    pub fn curve(&self) {
+        // use std::f32::consts::PI;
+        // let x = 80.0;
+        // let y = 80.0;
+        // static mut t: f32 = 0.0;
+        // let r = unsafe { t += 0.1; 80.0 + t };
+        // let tolerance = 0.1;
+        // let segments: u16 = ((PI / (1.0 - tolerance / r).acos()).ceil() as u16).max(4);
+        // let arc = 2.0 * PI / segments as f32;
+        // let rotor = (arc.cos(), arc.sin());
+        // let mut angle = (1.0, 0.0);
+        // let mut verts = Vec::with_capacity(segments as usize * 2 + 1);
+        // let (x_ndc, y_ndc) = pixel_to_ndc(x, y, 800.0, 600.0);
+        // verts.push(Vertex {
+        //     pos: [x_ndc, y_ndc, 0.0],
+        //     col: [1.0, 1.0, 1.0, 1.0],
+        // });
+        // let mut indices = Vec::with_capacity(segments as usize * 9);
+        // for i in 0..segments {
+        //     let (x_ndc, y_ndc) = pixel_to_ndc(x + (r - 0.5) * angle.0, y + (r - 0.5) * angle.1, 800.0, 600.0);
+        //     let (x_aa_ndc, y_aa_ndc) = pixel_to_ndc(x + (r + 0.5) * angle.0, y + (r + 0.5) * angle.1, 800.0, 600.0);
+        //     verts.push(Vertex {
+        //         pos: [x_ndc, y_ndc, 0.0],
+        //         col: [1.0, 1.0, 1.0, 1.0],
+        //     });
+        //     verts.push(Vertex {
+        //         pos: [x_aa_ndc, y_aa_ndc, 0.0],
+        //         col: [1.0, 1.0, 1.0, 0.0],
+        //     });
+        //     indices.extend(&[0, 1+i*2, 1+((i+1)%segments)*2, i*2+1, i*2+2, ((i+1)%segments)*2+2, i*2+1, ((i+1)%segments)*2+2, ((i+1)%segments)*2+1]);
+        //     angle = (rotor.0 * angle.0 - rotor.1 * angle.1, rotor.0 * angle.1 + rotor.1 * angle.0);
+        // }
+        // self.graphics.renderer.draw(&verts[..], &indices[..]);
     }
 
     pub fn stack<'a>(&'a self, children: &'a [&'a Scene]) -> &'a Scene {
