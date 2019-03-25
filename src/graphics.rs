@@ -2,23 +2,27 @@ use crate::render::*;
 use crate::alloc;
 
 pub struct Graphics {
+    width: f32,
+    height: f32,
+    dpi_factor: f32,
     renderer: Renderer,
     fonts: alloc::Slab<font_rs::font::Font<'static>>,
     atlas: Atlas,
     atlas_tex: TexId,
-    glyphs: Vec<Glyph>,
 }
 
 impl Graphics {
-    pub fn new() -> Graphics {
+    pub fn new(width: f32, height: f32, dpi_factor: f32) -> Graphics {
         let mut renderer = Renderer::new();
         let atlas_tex = renderer.create_tex(TexFormat::A, 1024, 1024, &[0; 1024*1024]);
         Graphics {
+            width,
+            height,
+            dpi_factor,
             renderer,
             fonts: alloc::Slab::new(),
             atlas: Atlas::new(1024, 1024),
             atlas_tex,
-            glyphs: Vec::new(),
         }
     }
 
@@ -30,12 +34,42 @@ impl Graphics {
         self.fonts.remove(font);
     }
 
-    pub fn draw(&mut self, screen_width: f32, screen_height: f32, dpi_factor: f32) {
+    pub fn set_size(&mut self, width: f32, height: f32) {
+        self.width = width;
+        self.height = height;
+    }
+
+    pub fn draw(&mut self, scene: &Scene) {
+        let mut glyphs = Vec::new();
+
+        walk(scene, [0.0, 0.0], &mut glyphs);
+        fn walk(scene: &Scene, origin: [f32; 2], glyphs: &mut Vec<Glyph>) {
+            match scene {
+                Scene::Glyphs(gs) => {
+                    glyphs.extend(*gs);
+                }
+                Scene::FillPath(..) => {
+
+                }
+                Scene::StrokePath(..) => {
+
+                }
+                Scene::Translate(offset, child) => {
+                    walk(child, [origin[0] + offset[0], origin[1] + offset[1]], glyphs);
+                }
+                Scene::Stack(children) => {
+                    for child in *children {
+                        walk(child, origin, glyphs);
+                    }
+                }
+            }
+        }
+
         let mut glyph_verts: Vec<VertexUV> = Vec::new();
         let mut glyph_indices: Vec<u16> = Vec::new();
         self.atlas.update_counter();
 
-        for glyph in self.glyphs.drain(0..) {
+        for glyph in glyphs {
             let rect = if let Some(rect) = self.atlas.get_cached(glyph.id) {
                 rect
             } else {
@@ -50,22 +84,22 @@ impl Graphics {
             let i = glyph_verts.len() as u16;
             let (u1, v1) = (rect.x as f32 / self.atlas.width as f32, (rect.y + rect.h) as f32 / self.atlas.height as f32);
             let (u2, v2) = ((rect.x + rect.w) as f32 / self.atlas.width as f32, rect.y as f32 / self.atlas.height as f32);
-            let (x1, y1) = pixel_to_ndc(glyph.pos[0], glyph.pos[1], screen_width, screen_height);
-            let (x2, y2) = pixel_to_ndc(glyph.pos[0] + rect.w as f32, glyph.pos[1] + rect.h as f32, screen_width, screen_height);
+            let (x1, y1) = pixel_to_ndc(glyph.pos[0], glyph.pos[1], self.width, self.height);
+            let (x2, y2) = pixel_to_ndc(glyph.pos[0] + rect.w as f32, glyph.pos[1] + rect.h as f32, self.width, self.height);
             glyph_verts.extend(&[VertexUV {
-                pos: [x1, y1, glyph.pos[2]],
+                pos: [x1, y1, 0.0],
                 col: [1.0, 1.0, 1.0, 1.0],
                 uv: [u1, v1],
             }, VertexUV {
-                pos: [x2, y1, glyph.pos[2]],
+                pos: [x2, y1, 0.0],
                 col: [1.0, 1.0, 1.0, 1.0],
                 uv: [u2, v1],
             }, VertexUV {
-                pos: [x2, y2, glyph.pos[2]],
+                pos: [x2, y2, 0.0],
                 col: [1.0, 1.0, 1.0, 1.0],
                 uv: [u2, v2],
             }, VertexUV {
-                pos: [x1, y2, glyph.pos[2]],
+                pos: [x1, y2, 0.0],
                 col: [1.0, 1.0, 1.0, 1.0],
                 uv: [u1, v2],
             }]);
@@ -74,10 +108,22 @@ impl Graphics {
         self.renderer.draw_tex(&glyph_verts, &glyph_indices, self.atlas_tex);
     }
 
-    pub fn paint<'a>(&'a mut self) -> Paint<'a> {
-        Paint {
-            graphics: self,
+    pub fn text(&self, pos: [f32; 2], text: &str, font_id: FontId, scale: u32) -> Vec<Glyph> {
+        let font = self.fonts.get(font_id).unwrap();
+        let mut pos = pos;
+        let mut glyphs = Vec::with_capacity(text.len());
+        for c in text.chars() {
+            let glyph = font.lookup_glyph_id(c as u32).unwrap();
+            let h_metrics = font.get_h_metrics(glyph, scale).unwrap();
+            if let Some(bbox) = font.get_bbox(glyph, scale) {
+                glyphs.push(Glyph {
+                    id: GlyphId { font: font_id, scale, glyph },
+                    pos: [pos[0] + bbox.l as f32, pos[1] + bbox.t as f32],
+                });
+            }
+            pos[0] += h_metrics.advance_width;
         }
+        glyphs
     }
 }
 
@@ -86,30 +132,46 @@ fn pixel_to_ndc(x: f32, y: f32, screen_width: f32, screen_height: f32) -> (f32, 
     (2.0 * (x / screen_width as f32 - 0.5), 2.0 * (1.0 - y / screen_height as f32 - 0.5))
 }
 
-pub struct Paint<'a> {
-    graphics: &'a mut Graphics,
+
+#[derive(Copy, Clone)]
+pub enum Scene<'a> {
+    Glyphs(&'a [Glyph]),
+    FillPath(&'a [PathSegment]),
+    StrokePath(&'a [PathSegment]),
+    Translate([f32; 2], &'a Scene<'a>),
+    Stack(&'a [&'a Scene<'a>]),
 }
 
-impl<'a> Paint<'a> {
-    pub fn glyph(&mut self, pos: [f32; 3], c: char, font: FontId, scale: u32) {
-        let glyph = self.graphics.fonts.get(font).unwrap().lookup_glyph_id(c as u32).unwrap();
-        self.graphics.glyphs.push(Glyph { id: GlyphId { font, scale, glyph }, pos });
+#[derive(Copy, Clone)]
+pub struct Glyph {
+    id: GlyphId,
+    pos: [f32; 2],
+}
+
+enum PathSegment {
+    Line { x: f32, y: f32 },
+    Arc { x: f32, y: f32, r: f32 },
+}
+
+pub struct Frame {
+    arena: alloc::Arena,
+}
+
+impl Frame {
+    pub fn new() -> Frame {
+        Frame {
+            arena: alloc::Arena::with_capacity(1024),
+        }
     }
 
-    pub fn text(&mut self, pos: [f32; 3], text: &str, font_id: FontId, scale: u32) {
-        let mut pos = pos;
-        let font = self.graphics.fonts.get(font_id).unwrap();
-        for c in text.chars() {
-            let glyph = font.lookup_glyph_id(c as u32).unwrap();
-            let h_metrics = font.get_h_metrics(glyph, scale).unwrap();
-            if let Some(bbox) = font.get_bbox(glyph, scale) {
-                self.graphics.glyphs.push(Glyph {
-                    id: GlyphId { font: font_id, scale, glyph },
-                    pos: [pos[0] + bbox.l as f32, pos[1] + bbox.t as f32, pos[2]],
-                });
-            }
-            pos[0] += h_metrics.advance_width;
-        }
+    pub fn glyphs<'a>(&'a self, glyphs: &[Glyph]) -> &'a Scene {
+        let glyphs = self.arena.alloc_slice(glyphs);
+        self.arena.alloc(Scene::Glyphs(glyphs))
+    }
+
+    pub fn stack<'a>(&'a self, children: &'a [&'a Scene]) -> &'a Scene {
+        let children = self.arena.alloc_slice(children);
+        self.arena.alloc(Scene::Stack(children))
     }
 }
 
@@ -122,13 +184,6 @@ pub struct GlyphId {
     scale: u32,
     glyph: u16,
 }
-
-#[derive(Copy, Clone)]
-struct Glyph {
-    id: GlyphId,
-    pos: [f32; 3],
-}
-
 
 struct Atlas {
     width: u32,
