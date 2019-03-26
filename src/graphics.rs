@@ -112,12 +112,11 @@ impl Graphics {
         let mut path_verts: Vec<Vertex> = Vec::new();
         let mut path_indices: Vec<u16> = Vec::new();
         for path in paths {
-            let path_start = path_verts.len();
+            let mut verts = Vec::new();
             for (i, PathSegment(pos, segment)) in path.iter().enumerate() {
                 match segment {
                     SegmentType::Line => {
-                        let (x, y) = pixel_to_ndc(pos[0], pos[1], self.width, self.height);
-                        path_verts.push(Vertex { pos: [x, y, 0.0], col: [1.0, 1.0, 1.0, 1.0] });
+                        verts.push(*pos);
                     }
                     SegmentType::Arc(radius, start_angle, end_angle) => {
                         let PathSegment(next, _) = path[(i+1) % path.len()];
@@ -127,26 +126,33 @@ impl Graphics {
                         let mut angle = [start_angle.cos(), -start_angle.sin()];
                         let center = [pos[0] - radius * angle[0], pos[1] - radius * angle[1]];
                         for _ in 0..segments {
-                            let (x, y) = pixel_to_ndc(center[0] + radius * angle[0], center[1] + radius * angle[1], self.width, self.height);
-                            path_verts.push(Vertex { pos: [x, y, 0.0], col: [1.0, 1.0, 1.0, 1.0] });
+                            verts.push([center[0] + radius * angle[0], center[1] + radius * angle[1]]);
                             angle = [rotor[0] * angle[0] - rotor[1] * angle[1], rotor[0] * angle[1] + rotor[1] * angle[0]];
                         }
                     }
                 }
             }
-            let path_len = path_verts.len() - path_start;
-            // for i in 0..path_len {
-            //     let prev = path_verts[(i-1)%path_len].pos;
-            //     let curr = path_verts[i].pos;
-            //     let next = path_verts[(i+1)%path_len].pos;
-            //     let prev_normal = normalized([curr[1] - prev[1], prev[0] - curr[0]]);
-            //     let next_normal = normalized([next[1] - curr[1], curr[0] - next[0]]);
-            //     let normal = normalized([(prev_normal[0] + next_normal[0]) / 2.0, (prev_normal[1] + next_normal[1]) / 2.0]);
-            //     path_verts[i].pos = [curr[0] - 0.5 * normal[0], curr[1] - 0.5 * normal[1], 0.0];
-            //     path_verts.push(Vertex { pos: [curr[0] + 0.5 * normal[0], curr[1] + 0.5 * normal[1], 0.0], col: [1.0, 1.0, 1.0, 0.0] });
-            // }
-            for i in path_start+1 .. path_verts.len()-1 {
-                path_indices.extend(&[path_start as u16, i as u16, (i+1) as u16]);
+            let path_start = path_verts.len();
+            for i in 0..verts.len() {
+                let prev = verts[(i+verts.len()-1)%verts.len()];
+                let curr = verts[i];
+                let next = verts[(i+1)%verts.len()];
+                let prev_normal = normalized([prev[1] - curr[1], curr[0] - prev[0]]);
+                let next_normal = normalized([curr[1] - next[1], next[0] - curr[0]]);
+                let normal = normalized([(prev_normal[0] + next_normal[0]) / 2.0, (prev_normal[1] + next_normal[1]) / 2.0]);
+                let (inner_x, inner_y) = pixel_to_ndc(curr[0] - 0.5 * normal[0], curr[1] - 0.5 * normal[1], self.width, self.height);
+                let (outer_x, outer_y) = pixel_to_ndc(curr[0] + 0.5 * normal[0], curr[1] + 0.5 * normal[1], self.width, self.height);
+                path_verts.push(Vertex { pos: [inner_x, inner_y, 0.0], col: [1.0, 1.0, 1.0, 1.0] });
+                path_verts.push(Vertex { pos: [outer_x, outer_y, 0.0], col: [1.0, 1.0, 1.0, 0.0] });
+            }
+            for i in 1..verts.len().saturating_sub(1) {
+                path_indices.extend(&[path_start as u16, (path_start + 2*i) as u16, (path_start + 2*i + 2) as u16]);
+            }
+            for i in 0..verts.len() {
+                path_indices.extend(&[
+                    (path_start + 2*i) as u16, (path_start + 2*i + 1) as u16, (path_start + 2*((i+1)%verts.len()) + 1) as u16,
+                    (path_start + 2*i) as u16, (path_start + 2*((i+1)%verts.len()) + 1) as u16, (path_start + 2*((i+1)%verts.len())) as u16,
+                ]);
             }
         }
         self.renderer.draw(&path_verts, &path_indices);
@@ -263,8 +269,7 @@ impl Frame {
 
     pub fn circle_fill<'a>(&'a self, pos: [f32; 2], radius: f32) -> &'a Scene {
         self.arena.alloc(Scene::FillPath(self.arena.alloc_slice(&[
-            PathSegment([pos[0] + radius, pos[1]], SegmentType::Arc(radius, 0.0, PI)),
-            PathSegment([pos[0] - radius, pos[1]], SegmentType::Arc(radius, PI, 2.0*PI)),
+            PathSegment([pos[0] + radius, pos[1]], SegmentType::Arc(radius, 0.0, 2.0*PI)),
         ])))
     }
 }
