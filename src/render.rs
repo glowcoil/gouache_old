@@ -11,13 +11,13 @@ macro_rules! offset {
     ($type:ty, $field:ident) => { &(*(0 as *const $type)).$field as *const _ as usize }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub struct Vertex {
     pub pos: [f32; 3],
     pub col: [f32; 4],
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub struct VertexUV {
     pub pos: [f32; 3],
     pub col: [f32; 4],

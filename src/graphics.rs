@@ -1,6 +1,10 @@
 use crate::render::*;
 use crate::alloc;
 
+use std::f32::consts::PI;
+
+const TOLERANCE: f32 = 0.1;
+
 pub struct Graphics {
     width: f32,
     height: f32,
@@ -41,26 +45,24 @@ impl Graphics {
 
     pub fn draw(&mut self, scene: &Scene) {
         let mut glyphs = Vec::new();
+        let mut paths = Vec::new();
 
-        walk(scene, [0.0, 0.0], &mut glyphs);
-        fn walk(scene: &Scene, origin: [f32; 2], glyphs: &mut Vec<Glyph>) {
+        walk(scene, [0.0, 0.0], &mut glyphs, &mut paths);
+        fn walk<'a>(scene: &'a Scene, origin: [f32; 2], glyphs: &mut Vec<Glyph>, paths: &mut Vec<&'a [PathSegment]>) {
             match scene {
+                Scene::Stack(children) => {
+                    for child in *children {
+                        walk(child, origin, glyphs, paths);
+                    }
+                }
+                Scene::Translate(offset, child) => {
+                    walk(child, [origin[0] + offset[0], origin[1] + offset[1]], glyphs, paths);
+                }
                 Scene::Glyphs(gs) => {
                     glyphs.extend(*gs);
                 }
-                Scene::FillPath(..) => {
-
-                }
-                Scene::StrokePath(..) => {
-
-                }
-                Scene::Translate(offset, child) => {
-                    walk(child, [origin[0] + offset[0], origin[1] + offset[1]], glyphs);
-                }
-                Scene::Stack(children) => {
-                    for child in *children {
-                        walk(child, origin, glyphs);
-                    }
+                Scene::FillPath(path) => {
+                    paths.push(path);
                 }
             }
         }
@@ -106,6 +108,48 @@ impl Graphics {
             glyph_indices.extend(&[i, i+1, i+2, i, i+2, i+3]);
         }
         self.renderer.draw_tex(&glyph_verts, &glyph_indices, self.atlas_tex);
+
+        let mut path_verts: Vec<Vertex> = Vec::new();
+        let mut path_indices: Vec<u16> = Vec::new();
+        for path in paths {
+            let path_start = path_verts.len();
+            for (i, PathSegment(pos, segment)) in path.iter().enumerate() {
+                match segment {
+                    SegmentType::Line => {
+                        let (x, y) = pixel_to_ndc(pos[0], pos[1], self.width, self.height);
+                        path_verts.push(Vertex { pos: [x, y, 0.0], col: [1.0, 1.0, 1.0, 1.0] });
+                    }
+                    SegmentType::Arc(radius, start_angle, end_angle) => {
+                        let PathSegment(next, _) = path[(i+1) % path.len()];
+                        let segments: u16 = (((end_angle - start_angle).abs() / (1.0 - TOLERANCE / radius).acos()).ceil() as u16).max(4);
+                        let arc = (end_angle - start_angle) / segments as f32;
+                        let rotor = [arc.cos(), -arc.sin()];
+                        let mut angle = [start_angle.cos(), -start_angle.sin()];
+                        let center = [pos[0] - radius * angle[0], pos[1] - radius * angle[1]];
+                        for _ in 0..segments {
+                            let (x, y) = pixel_to_ndc(center[0] + radius * angle[0], center[1] + radius * angle[1], self.width, self.height);
+                            path_verts.push(Vertex { pos: [x, y, 0.0], col: [1.0, 1.0, 1.0, 1.0] });
+                            angle = [rotor[0] * angle[0] - rotor[1] * angle[1], rotor[0] * angle[1] + rotor[1] * angle[0]];
+                        }
+                    }
+                }
+            }
+            let path_len = path_verts.len() - path_start;
+            // for i in 0..path_len {
+            //     let prev = path_verts[(i-1)%path_len].pos;
+            //     let curr = path_verts[i].pos;
+            //     let next = path_verts[(i+1)%path_len].pos;
+            //     let prev_normal = normalized([curr[1] - prev[1], prev[0] - curr[0]]);
+            //     let next_normal = normalized([next[1] - curr[1], curr[0] - next[0]]);
+            //     let normal = normalized([(prev_normal[0] + next_normal[0]) / 2.0, (prev_normal[1] + next_normal[1]) / 2.0]);
+            //     path_verts[i].pos = [curr[0] - 0.5 * normal[0], curr[1] - 0.5 * normal[1], 0.0];
+            //     path_verts.push(Vertex { pos: [curr[0] + 0.5 * normal[0], curr[1] + 0.5 * normal[1], 0.0], col: [1.0, 1.0, 1.0, 0.0] });
+            // }
+            for i in path_start+1 .. path_verts.len()-1 {
+                path_indices.extend(&[path_start as u16, i as u16, (i+1) as u16]);
+            }
+        }
+        self.renderer.draw(&path_verts, &path_indices);
     }
 
     pub fn text(&self, pos: [f32; 2], text: &str, font_id: FontId, scale: u32) -> Vec<Glyph> {
@@ -132,14 +176,29 @@ fn pixel_to_ndc(x: f32, y: f32, screen_width: f32, screen_height: f32) -> (f32, 
     (2.0 * (x / screen_width as f32 - 0.5), 2.0 * (1.0 - y / screen_height as f32 - 0.5))
 }
 
+#[inline]
+fn distance(p1: [f32; 2], p2: [f32; 2]) -> f32 {
+    ((p2[0] - p1[0]) * (p2[0] - p1[0]) + (p2[1] - p1[1]) * (p2[1] - p1[1])).sqrt()
+}
+
+#[inline]
+fn length(p: [f32; 2]) -> f32 {
+    (p[0] * p[0] + p[1] * p[1]).sqrt()
+}
+
+#[inline]
+fn normalized(p: [f32; 2]) -> [f32; 2] {
+    let len = length(p);
+    [p[0] / len, p[1] / len]
+}
+
 
 #[derive(Copy, Clone)]
 pub enum Scene<'a> {
+    Stack(&'a [&'a Scene<'a>]),
+    Translate([f32; 2], &'a Scene<'a>),
     Glyphs(&'a [Glyph]),
     FillPath(&'a [PathSegment]),
-    StrokePath(&'a [PathSegment]),
-    Translate([f32; 2], &'a Scene<'a>),
-    Stack(&'a [&'a Scene<'a>]),
 }
 
 #[derive(Copy, Clone)]
@@ -148,9 +207,13 @@ pub struct Glyph {
     pos: [f32; 2],
 }
 
-enum PathSegment {
-    Line { to: [f32; 2] },
-    Arc { to: [f32; 2], r: f32 },
+#[derive(Copy, Clone)]
+struct PathSegment([f32; 2], SegmentType);
+
+#[derive(Copy, Clone)]
+enum SegmentType {
+    Line,
+    Arc(f32, f32, f32),
 }
 
 pub struct Frame {
@@ -164,49 +227,45 @@ impl Frame {
         }
     }
 
-    pub fn glyphs<'a>(&'a self, glyphs: &[Glyph]) -> &'a Scene {
-        let glyphs = self.arena.alloc_slice(glyphs);
-        self.arena.alloc(Scene::Glyphs(glyphs))
-    }
-
-    pub fn curve(&self) {
-        // use std::f32::consts::PI;
-        // let x = 80.0;
-        // let y = 80.0;
-        // static mut t: f32 = 0.0;
-        // let r = unsafe { t += 0.1; 80.0 + t };
-        // let tolerance = 0.1;
-        // let segments: u16 = ((PI / (1.0 - tolerance / r).acos()).ceil() as u16).max(4);
-        // let arc = 2.0 * PI / segments as f32;
-        // let rotor = (arc.cos(), arc.sin());
-        // let mut angle = (1.0, 0.0);
-        // let mut verts = Vec::with_capacity(segments as usize * 2 + 1);
-        // let (x_ndc, y_ndc) = pixel_to_ndc(x, y, 800.0, 600.0);
-        // verts.push(Vertex {
-        //     pos: [x_ndc, y_ndc, 0.0],
-        //     col: [1.0, 1.0, 1.0, 1.0],
-        // });
-        // let mut indices = Vec::with_capacity(segments as usize * 9);
-        // for i in 0..segments {
-        //     let (x_ndc, y_ndc) = pixel_to_ndc(x + (r - 0.5) * angle.0, y + (r - 0.5) * angle.1, 800.0, 600.0);
-        //     let (x_aa_ndc, y_aa_ndc) = pixel_to_ndc(x + (r + 0.5) * angle.0, y + (r + 0.5) * angle.1, 800.0, 600.0);
-        //     verts.push(Vertex {
-        //         pos: [x_ndc, y_ndc, 0.0],
-        //         col: [1.0, 1.0, 1.0, 1.0],
-        //     });
-        //     verts.push(Vertex {
-        //         pos: [x_aa_ndc, y_aa_ndc, 0.0],
-        //         col: [1.0, 1.0, 1.0, 0.0],
-        //     });
-        //     indices.extend(&[0, 1+i*2, 1+((i+1)%segments)*2, i*2+1, i*2+2, ((i+1)%segments)*2+2, i*2+1, ((i+1)%segments)*2+2, ((i+1)%segments)*2+1]);
-        //     angle = (rotor.0 * angle.0 - rotor.1 * angle.1, rotor.0 * angle.1 + rotor.1 * angle.0);
-        // }
-        // self.graphics.renderer.draw(&verts[..], &indices[..]);
-    }
-
     pub fn stack<'a>(&'a self, children: &'a [&'a Scene]) -> &'a Scene {
-        let children = self.arena.alloc_slice(children);
-        self.arena.alloc(Scene::Stack(children))
+        self.arena.alloc(Scene::Stack(self.arena.alloc_slice(children)))
+    }
+
+    pub fn translate<'a>(&'a self, offset: [f32; 2], child: &'a Scene) -> &'a Scene {
+        self.arena.alloc(Scene::Translate(offset, child))
+    }
+
+    pub fn glyphs<'a>(&'a self, glyphs: &[Glyph]) -> &'a Scene {
+        self.arena.alloc(Scene::Glyphs(self.arena.alloc_slice(glyphs)))
+    }
+
+    pub fn rect_fill<'a>(&'a self, pos: [f32; 2], size: [f32; 2]) -> &'a Scene {
+        self.arena.alloc(Scene::FillPath(self.arena.alloc_slice(&[
+            PathSegment([pos[0], pos[1]], SegmentType::Line),
+            PathSegment([pos[0], pos[1] + size[1]], SegmentType::Line),
+            PathSegment([pos[0] + size[0], pos[1] + size[1]], SegmentType::Line),
+            PathSegment([pos[0] + size[0], pos[1]], SegmentType::Line),
+        ])))
+    }
+
+    pub fn round_rect_fill<'a>(&'a self, pos: [f32; 2], size: [f32; 2], radius: f32) -> &'a Scene {
+        self.arena.alloc(Scene::FillPath(self.arena.alloc_slice(&[
+            PathSegment([pos[0] + radius, pos[1]], SegmentType::Arc(radius, PI/2.0, PI)),
+            PathSegment([pos[0], pos[1] + radius], SegmentType::Line),
+            PathSegment([pos[0], pos[1] + size[1] - radius], SegmentType::Arc(radius, PI, 3.0*PI/2.0)),
+            PathSegment([pos[0] + radius, pos[1] + size[1]], SegmentType::Line),
+            PathSegment([pos[0] + size[0] - radius, pos[1] + size[1]], SegmentType::Arc(radius, 3.0*PI/2.0, 2.0*PI)),
+            PathSegment([pos[0] + size[0], pos[1] + size[1] - radius], SegmentType::Line),
+            PathSegment([pos[0] + size[0], pos[1] + radius], SegmentType::Arc(radius, 0.0, PI/2.0)),
+            PathSegment([pos[0] + size[0] - radius, pos[1]], SegmentType::Line),
+        ])))
+    }
+
+    pub fn circle_fill<'a>(&'a self, pos: [f32; 2], radius: f32) -> &'a Scene {
+        self.arena.alloc(Scene::FillPath(self.arena.alloc_slice(&[
+            PathSegment([pos[0] + radius, pos[1]], SegmentType::Arc(radius, 0.0, PI)),
+            PathSegment([pos[0] - radius, pos[1]], SegmentType::Arc(radius, PI, 2.0*PI)),
+        ])))
     }
 }
 

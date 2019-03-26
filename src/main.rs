@@ -57,6 +57,8 @@ fn main() {
             graphics.draw(frame.stack(&[
                 frame.glyphs(&graphics.text([0.0, 10.0], "Jackdaws love my big sphinx of quartz.", font, 14)),
                 frame.glyphs(&graphics.text([700.0, 580.0], &fps_text, font, 14)),
+                // frame.circle_fill([100.0, 100.0], 100.0),
+                frame.round_rect_fill([100.0, 100.0], [100.0, 100.0], 40.0),
             ]));
         }
 
