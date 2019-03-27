@@ -48,7 +48,7 @@ impl Graphics {
         let mut paths = Vec::new();
 
         walk(scene, [0.0, 0.0], &mut glyphs, &mut paths);
-        fn walk<'a>(scene: &'a Scene, origin: [f32; 2], glyphs: &mut Vec<Glyph>, paths: &mut Vec<&'a [PathSegment]>) {
+        fn walk<'a>(scene: &'a Scene, origin: [f32; 2], glyphs: &mut Vec<([f32; 2], Color,  &'a [Glyph])>, paths: &mut Vec<([f32; 2], Color, &'a [PathSegment])>) {
             match scene {
                 Scene::Stack(children) => {
                     for child in *children {
@@ -58,11 +58,11 @@ impl Graphics {
                 Scene::Translate(offset, child) => {
                     walk(child, [origin[0] + offset[0], origin[1] + offset[1]], glyphs, paths);
                 }
-                Scene::Glyphs(gs) => {
-                    glyphs.extend(*gs);
+                Scene::Glyphs(color, gs) => {
+                    glyphs.push((origin, *color, gs));
                 }
-                Scene::FillPath(path) => {
-                    paths.push(path);
+                Scene::FillPath(color, path) => {
+                    paths.push((origin, *color, path));
                 }
             }
         }
@@ -71,47 +71,50 @@ impl Graphics {
         let mut glyph_indices: Vec<u16> = Vec::new();
         self.atlas.update_counter();
 
-        for glyph in glyphs {
-            let rect = if let Some(rect) = self.atlas.get_cached(glyph.id) {
-                rect
-            } else {
-                let font = self.fonts.get(glyph.id.font).unwrap();
-                let bbox = font.get_bbox(glyph.id.glyph, glyph.id.scale).unwrap();
-                let rect = self.atlas.insert(glyph.id, bbox.width() as u32, bbox.height() as u32).unwrap();
-                let rendered = font.render_glyph(glyph.id.glyph, glyph.id.scale).unwrap();
-                self.renderer.update_tex(self.atlas_tex, rect.x as usize, rect.y as usize, rendered.width as usize, rendered.height as usize, &rendered.data);
-                rect
-            };
+        for (origin, color, glyph_list) in glyphs {
+            let col = [color.r, color.g, color.b, color.a];
+            for glyph in glyph_list {
+                let rect = if let Some(rect) = self.atlas.get_cached(glyph.id) {
+                    rect
+                } else {
+                    let font = self.fonts.get(glyph.id.font).unwrap();
+                    let bbox = font.get_bbox(glyph.id.glyph, glyph.id.scale).unwrap();
+                    let rect = self.atlas.insert(glyph.id, bbox.width() as u32, bbox.height() as u32).unwrap();
+                    let rendered = font.render_glyph(glyph.id.glyph, glyph.id.scale).unwrap();
+                    self.renderer.update_tex(self.atlas_tex, rect.x as usize, rect.y as usize, rendered.width as usize, rendered.height as usize, &rendered.data);
+                    rect
+                };
 
-            let i = glyph_verts.len() as u16;
-            let (u1, v1) = (rect.x as f32 / self.atlas.width as f32, (rect.y + rect.h) as f32 / self.atlas.height as f32);
-            let (u2, v2) = ((rect.x + rect.w) as f32 / self.atlas.width as f32, rect.y as f32 / self.atlas.height as f32);
-            let (x1, y1) = pixel_to_ndc(glyph.pos[0], glyph.pos[1], self.width, self.height);
-            let (x2, y2) = pixel_to_ndc(glyph.pos[0] + rect.w as f32, glyph.pos[1] + rect.h as f32, self.width, self.height);
-            glyph_verts.extend(&[VertexUV {
-                pos: [x1, y1, 0.0],
-                col: [1.0, 1.0, 1.0, 1.0],
-                uv: [u1, v1],
-            }, VertexUV {
-                pos: [x2, y1, 0.0],
-                col: [1.0, 1.0, 1.0, 1.0],
-                uv: [u2, v1],
-            }, VertexUV {
-                pos: [x2, y2, 0.0],
-                col: [1.0, 1.0, 1.0, 1.0],
-                uv: [u2, v2],
-            }, VertexUV {
-                pos: [x1, y2, 0.0],
-                col: [1.0, 1.0, 1.0, 1.0],
-                uv: [u1, v2],
-            }]);
-            glyph_indices.extend(&[i, i+1, i+2, i, i+2, i+3]);
+                let i = glyph_verts.len() as u16;
+                let (u1, v1) = (rect.x as f32 / self.atlas.width as f32, (rect.y + rect.h) as f32 / self.atlas.height as f32);
+                let (u2, v2) = ((rect.x + rect.w) as f32 / self.atlas.width as f32, rect.y as f32 / self.atlas.height as f32);
+                let (x1, y1) = pixel_to_ndc(origin[0] + glyph.pos[0], origin[1] + glyph.pos[1], self.width, self.height);
+                let (x2, y2) = pixel_to_ndc(origin[0] + glyph.pos[0] + rect.w as f32, origin[1] + glyph.pos[1] + rect.h as f32, self.width, self.height);
+                glyph_verts.extend(&[VertexUV {
+                    pos: [x1, y1, 0.0],
+                    col,
+                    uv: [u1, v1],
+                }, VertexUV {
+                    pos: [x2, y1, 0.0],
+                    col,
+                    uv: [u2, v1],
+                }, VertexUV {
+                    pos: [x2, y2, 0.0],
+                    col,
+                    uv: [u2, v2],
+                }, VertexUV {
+                    pos: [x1, y2, 0.0],
+                    col,
+                    uv: [u1, v2],
+                }]);
+                glyph_indices.extend(&[i, i+1, i+2, i, i+2, i+3]);
+            }
         }
         self.renderer.draw_tex(&glyph_verts, &glyph_indices, self.atlas_tex);
 
         let mut path_verts: Vec<Vertex> = Vec::new();
         let mut path_indices: Vec<u16> = Vec::new();
-        for path in paths {
+        for (origin, color, path) in paths {
             let mut verts = Vec::new();
             for (i, PathSegment(pos, segment)) in path.iter().enumerate() {
                 match segment {
@@ -140,10 +143,10 @@ impl Graphics {
                 let prev_normal = normalized([prev[1] - curr[1], curr[0] - prev[0]]);
                 let next_normal = normalized([curr[1] - next[1], next[0] - curr[0]]);
                 let normal = normalized([(prev_normal[0] + next_normal[0]) / 2.0, (prev_normal[1] + next_normal[1]) / 2.0]);
-                let (inner_x, inner_y) = pixel_to_ndc(curr[0] - 0.5 * normal[0], curr[1] - 0.5 * normal[1], self.width, self.height);
-                let (outer_x, outer_y) = pixel_to_ndc(curr[0] + 0.5 * normal[0], curr[1] + 0.5 * normal[1], self.width, self.height);
-                path_verts.push(Vertex { pos: [inner_x, inner_y, 0.0], col: [1.0, 1.0, 1.0, 1.0] });
-                path_verts.push(Vertex { pos: [outer_x, outer_y, 0.0], col: [1.0, 1.0, 1.0, 0.0] });
+                let (inner_x, inner_y) = pixel_to_ndc(origin[0] + curr[0] - 0.5 * normal[0], origin[1] + curr[1] - 0.5 * normal[1], self.width, self.height);
+                let (outer_x, outer_y) = pixel_to_ndc(origin[0] + curr[0] + 0.5 * normal[0], origin[1] + curr[1] + 0.5 * normal[1], self.width, self.height);
+                path_verts.push(Vertex { pos: [inner_x, inner_y, 0.0], col: [color.r, color.g, color.b, color.a] });
+                path_verts.push(Vertex { pos: [outer_x, outer_y, 0.0], col: [color.r, color.g, color.b, 0.0] });
             }
             for i in 1..verts.len().saturating_sub(1) {
                 path_indices.extend(&[path_start as u16, (path_start + 2*i) as u16, (path_start + 2*i + 2) as u16]);
@@ -203,8 +206,19 @@ fn normalized(p: [f32; 2]) -> [f32; 2] {
 pub enum Scene<'a> {
     Stack(&'a [&'a Scene<'a>]),
     Translate([f32; 2], &'a Scene<'a>),
-    Glyphs(&'a [Glyph]),
-    FillPath(&'a [PathSegment]),
+    Glyphs(Color, &'a [Glyph]),
+    FillPath(Color, &'a [PathSegment]),
+}
+
+#[derive(Copy, Clone)]
+pub struct Color {
+    r: f32, g: f32, b: f32, a: f32
+}
+
+impl Color {
+    pub fn rgba(r: f32, g: f32, b: f32, a: f32) -> Color {
+        Color { r, g, b, a }
+    }
 }
 
 #[derive(Copy, Clone)]
@@ -241,12 +255,12 @@ impl Frame {
         self.arena.alloc(Scene::Translate(offset, child))
     }
 
-    pub fn glyphs<'a>(&'a self, glyphs: &[Glyph]) -> &'a Scene {
-        self.arena.alloc(Scene::Glyphs(self.arena.alloc_slice(glyphs)))
+    pub fn glyphs<'a>(&'a self, glyphs: &[Glyph], color: Color) -> &'a Scene {
+        self.arena.alloc(Scene::Glyphs(color, self.arena.alloc_slice(glyphs)))
     }
 
-    pub fn rect_fill<'a>(&'a self, pos: [f32; 2], size: [f32; 2]) -> &'a Scene {
-        self.arena.alloc(Scene::FillPath(self.arena.alloc_slice(&[
+    pub fn rect_fill<'a>(&'a self, pos: [f32; 2], size: [f32; 2], color: Color) -> &'a Scene {
+        self.arena.alloc(Scene::FillPath(color, self.arena.alloc_slice(&[
             PathSegment([pos[0], pos[1]], SegmentType::Line),
             PathSegment([pos[0], pos[1] + size[1]], SegmentType::Line),
             PathSegment([pos[0] + size[0], pos[1] + size[1]], SegmentType::Line),
@@ -254,8 +268,8 @@ impl Frame {
         ])))
     }
 
-    pub fn round_rect_fill<'a>(&'a self, pos: [f32; 2], size: [f32; 2], radius: f32) -> &'a Scene {
-        self.arena.alloc(Scene::FillPath(self.arena.alloc_slice(&[
+    pub fn round_rect_fill<'a>(&'a self, pos: [f32; 2], size: [f32; 2], radius: f32, color: Color) -> &'a Scene {
+        self.arena.alloc(Scene::FillPath(color, self.arena.alloc_slice(&[
             PathSegment([pos[0] + radius, pos[1]], SegmentType::Arc(radius, PI/2.0, PI)),
             PathSegment([pos[0], pos[1] + radius], SegmentType::Line),
             PathSegment([pos[0], pos[1] + size[1] - radius], SegmentType::Arc(radius, PI, 3.0*PI/2.0)),
@@ -267,8 +281,8 @@ impl Frame {
         ])))
     }
 
-    pub fn circle_fill<'a>(&'a self, pos: [f32; 2], radius: f32) -> &'a Scene {
-        self.arena.alloc(Scene::FillPath(self.arena.alloc_slice(&[
+    pub fn circle_fill<'a>(&'a self, pos: [f32; 2], radius: f32, color: Color) -> &'a Scene {
+        self.arena.alloc(Scene::FillPath(color, self.arena.alloc_slice(&[
             PathSegment([pos[0] + radius, pos[1]], SegmentType::Arc(radius, 0.0, 2.0*PI)),
         ])))
     }

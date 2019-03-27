@@ -55,10 +55,11 @@ fn main() {
         {
             let frame = Frame::new();
             graphics.draw(frame.stack(&[
-                frame.glyphs(&graphics.text([0.0, 10.0], "Jackdaws love my big sphinx of quartz.", font, 14)),
-                frame.glyphs(&graphics.text([700.0, 580.0], &fps_text, font, 14)),
-                // frame.circle_fill([100.0, 100.0], 100.0),
-                frame.round_rect_fill([100.0, 100.0], [100.0, 100.0], 40.0),
+                frame.glyphs(&graphics.text([0.0, 10.0], "Jackdaws love my big sphinx of quartz.", font, 14), Color::rgba(0.8, 0.8, 0.8, 1.0)),
+                frame.glyphs(&graphics.text([700.0, 580.0], &fps_text, font, 14), Color::rgba(1.0, 1.0, 1.0, 1.0)),
+                frame.round_rect_fill([100.0, 100.0], [100.0, 100.0], 5.0, Color::rgba(0.8, 0.5, 0.0, 1.0)),
+                frame.circle_fill([225.0, 225.0], 101.0, Color::rgba(0.5, 0.25, 1.0, 0.75)),
+                frame.translate([300.0, 100.0], frame.circle_fill([0.0, 0.0], 150.0, Color::rgba(0.0, 0.5, 1.0, 0.5))),
             ]));
         }
 
