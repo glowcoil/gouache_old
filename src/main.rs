@@ -18,8 +18,7 @@ fn main() {
     let window = glutin::WindowBuilder::new()
         .with_dimensions(glutin::dpi::LogicalSize::new(800.0, 600.0))
         .with_title("gouache");
-    let context = glutin::ContextBuilder::new()
-        .with_srgb(true);
+    let context = glutin::ContextBuilder::new();
     let gl_window = glutin::GlWindow::new(window, context, &events_loop).unwrap();
 
     unsafe { gl_window.make_current().unwrap(); }
@@ -47,12 +46,8 @@ fn main() {
         let fps = 100000.0 / (sum as f32);
         let fps_text = fps.round().to_string();
 
-        unsafe {
-            gl::ClearColor(0.1, 0.15, 0.2, 1.0);
-            gl::Clear(gl::COLOR_BUFFER_BIT);
-        }
-
         {
+            graphics.clear(Color::rgba(0.1, 0.15, 0.2, 1.0));
             let frame = Frame::new();
             graphics.draw(frame.stack(&[
                 frame.glyphs(&graphics.text([0.0, 10.0], "Jackdaws love my big sphinx of quartz.", font, 14), Color::rgba(0.8, 0.8, 0.8, 1.0)),

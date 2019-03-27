@@ -43,6 +43,10 @@ impl Graphics {
         self.height = height;
     }
 
+    pub fn clear(&mut self, color: Color) {
+        self.renderer.clear(color.to_linear());
+    }
+
     pub fn draw(&mut self, scene: &Scene) {
         let mut glyphs = Vec::new();
         let mut paths = Vec::new();
@@ -72,7 +76,7 @@ impl Graphics {
         self.atlas.update_counter();
 
         for (origin, color, glyph_list) in glyphs {
-            let col = [color.r, color.g, color.b, color.a];
+            let col = color.to_linear();
             for glyph in glyph_list {
                 let rect = if let Some(rect) = self.atlas.get_cached(glyph.id) {
                     rect
@@ -115,6 +119,10 @@ impl Graphics {
         let mut path_verts: Vec<Vertex> = Vec::new();
         let mut path_indices: Vec<u16> = Vec::new();
         for (origin, color, path) in paths {
+            let col = color.to_linear();
+            let mut col_alpha = col;
+            col_alpha[3] = 0.0;
+
             let mut verts = Vec::new();
             for (i, PathSegment(pos, segment)) in path.iter().enumerate() {
                 match segment {
@@ -145,8 +153,8 @@ impl Graphics {
                 let normal = normalized([(prev_normal[0] + next_normal[0]) / 2.0, (prev_normal[1] + next_normal[1]) / 2.0]);
                 let (inner_x, inner_y) = pixel_to_ndc(origin[0] + curr[0] - 0.5 * normal[0], origin[1] + curr[1] - 0.5 * normal[1], self.width, self.height);
                 let (outer_x, outer_y) = pixel_to_ndc(origin[0] + curr[0] + 0.5 * normal[0], origin[1] + curr[1] + 0.5 * normal[1], self.width, self.height);
-                path_verts.push(Vertex { pos: [inner_x, inner_y, 0.0], col: [color.r, color.g, color.b, color.a] });
-                path_verts.push(Vertex { pos: [outer_x, outer_y, 0.0], col: [color.r, color.g, color.b, 0.0] });
+                path_verts.push(Vertex { pos: [inner_x, inner_y, 0.0], col });
+                path_verts.push(Vertex { pos: [outer_x, outer_y, 0.0], col: col_alpha });
             }
             for i in 1..verts.len().saturating_sub(1) {
                 path_indices.extend(&[path_start as u16, (path_start + 2*i) as u16, (path_start + 2*i + 2) as u16]);
@@ -219,6 +227,14 @@ impl Color {
     pub fn rgba(r: f32, g: f32, b: f32, a: f32) -> Color {
         Color { r, g, b, a }
     }
+
+    fn to_linear(&self) -> [f32; 4] {
+        [srgb_to_linear(self.r), srgb_to_linear(self.g), srgb_to_linear(self.b), self.a]
+    }
+}
+
+fn srgb_to_linear(x: f32) -> f32 {
+    if x < 0.04045 { x / 12.92 } else { ((x + 0.055)/1.055).powf(2.4)  }
 }
 
 #[derive(Copy, Clone)]

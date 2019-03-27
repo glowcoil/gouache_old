@@ -188,6 +188,7 @@ impl Renderer {
         unsafe {
             gl::BlendFunc(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA);
             gl::Enable(gl::BLEND);
+            gl::Enable(gl::FRAMEBUFFER_SRGB);
         }
 
         Renderer {
@@ -196,6 +197,13 @@ impl Renderer {
             prog_tex_a,
 
             textures: Slab::new(),
+        }
+    }
+
+    pub fn clear(&mut self, col: [f32; 4]) {
+        unsafe {
+            gl::ClearColor(col[0], col[1], col[2], col[3]);
+            gl::Clear(gl::COLOR_BUFFER_BIT);
         }
     }
 
