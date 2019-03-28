@@ -176,10 +176,11 @@ impl Graphics {
         for c in text.chars() {
             let glyph = font.lookup_glyph_id(c as u32).unwrap();
             let h_metrics = font.get_h_metrics(glyph, scale).unwrap();
+            let v_metrics = font.get_v_metrics(scale).unwrap();
             if let Some(bbox) = font.get_bbox(glyph, scale) {
                 glyphs.push(Glyph {
                     id: GlyphId { font: font_id, scale, glyph },
-                    pos: [pos[0] + bbox.l as f32, pos[1] + bbox.t as f32],
+                    pos: [pos[0] + bbox.l as f32, pos[1] + bbox.t as f32 + v_metrics.ascent as f32],
                 });
             }
             pos[0] += h_metrics.advance_width;
