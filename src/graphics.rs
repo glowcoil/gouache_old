@@ -47,25 +47,25 @@ impl Graphics {
         self.renderer.clear(color.to_linear());
     }
 
-    pub fn draw(&mut self, scene: &Scene) {
+    pub fn draw(&mut self, shape: &Shape) {
         let mut glyphs = Vec::new();
         let mut paths = Vec::new();
 
-        walk(scene, [0.0, 0.0], &mut glyphs, &mut paths);
-        fn walk<'a>(scene: &'a Scene, origin: [f32; 2], glyphs: &mut Vec<([f32; 2], Color,  &'a [Glyph])>, paths: &mut Vec<([f32; 2], Color, &'a [PathSegment])>) {
-            match scene {
-                Scene::Stack(children) => {
+        walk(shape, [0.0, 0.0], &mut glyphs, &mut paths);
+        fn walk<'a>(shape: &'a Shape, origin: [f32; 2], glyphs: &mut Vec<([f32; 2], Color,  &'a [Glyph])>, paths: &mut Vec<([f32; 2], Color, &'a [PathSegment])>) {
+            match shape {
+                Shape::Stack(children) => {
                     for child in *children {
                         walk(child, origin, glyphs, paths);
                     }
                 }
-                Scene::Translate(offset, child) => {
+                Shape::Translate(offset, child) => {
                     walk(child, [origin[0] + offset[0], origin[1] + offset[1]], glyphs, paths);
                 }
-                Scene::Glyphs(color, gs) => {
+                Shape::Glyphs(color, gs) => {
                     glyphs.push((origin, *color, gs));
                 }
-                Scene::FillPath(color, path) => {
+                Shape::FillPath(color, path) => {
                     paths.push((origin, *color, path));
                 }
             }
@@ -212,9 +212,9 @@ fn normalized(p: [f32; 2]) -> [f32; 2] {
 
 
 #[derive(Copy, Clone)]
-pub enum Scene<'a> {
-    Stack(&'a [&'a Scene<'a>]),
-    Translate([f32; 2], &'a Scene<'a>),
+pub enum Shape<'a> {
+    Stack(&'a [&'a Shape<'a>]),
+    Translate([f32; 2], &'a Shape<'a>),
     Glyphs(Color, &'a [Glyph]),
     FillPath(Color, &'a [PathSegment]),
 }
@@ -264,20 +264,20 @@ impl Frame {
         }
     }
 
-    pub fn stack<'a>(&'a self, children: &'a [&'a Scene]) -> &'a Scene {
-        self.arena.alloc(Scene::Stack(self.arena.alloc_slice(children)))
+    pub fn stack<'a>(&'a self, children: &'a [&'a Shape]) -> &'a Shape {
+        self.arena.alloc(Shape::Stack(self.arena.alloc_slice(children)))
     }
 
-    pub fn translate<'a>(&'a self, offset: [f32; 2], child: &'a Scene) -> &'a Scene {
-        self.arena.alloc(Scene::Translate(offset, child))
+    pub fn translate<'a>(&'a self, offset: [f32; 2], child: &'a Shape) -> &'a Shape {
+        self.arena.alloc(Shape::Translate(offset, child))
     }
 
-    pub fn glyphs<'a>(&'a self, glyphs: &[Glyph], color: Color) -> &'a Scene {
-        self.arena.alloc(Scene::Glyphs(color, self.arena.alloc_slice(glyphs)))
+    pub fn glyphs<'a>(&'a self, glyphs: &[Glyph], color: Color) -> &'a Shape {
+        self.arena.alloc(Shape::Glyphs(color, self.arena.alloc_slice(glyphs)))
     }
 
-    pub fn rect_fill<'a>(&'a self, pos: [f32; 2], size: [f32; 2], color: Color) -> &'a Scene {
-        self.arena.alloc(Scene::FillPath(color, self.arena.alloc_slice(&[
+    pub fn rect_fill<'a>(&'a self, pos: [f32; 2], size: [f32; 2], color: Color) -> &'a Shape {
+        self.arena.alloc(Shape::FillPath(color, self.arena.alloc_slice(&[
             PathSegment([pos[0], pos[1]], SegmentType::Line),
             PathSegment([pos[0], pos[1] + size[1]], SegmentType::Line),
             PathSegment([pos[0] + size[0], pos[1] + size[1]], SegmentType::Line),
@@ -285,8 +285,8 @@ impl Frame {
         ])))
     }
 
-    pub fn round_rect_fill<'a>(&'a self, pos: [f32; 2], size: [f32; 2], radius: f32, color: Color) -> &'a Scene {
-        self.arena.alloc(Scene::FillPath(color, self.arena.alloc_slice(&[
+    pub fn round_rect_fill<'a>(&'a self, pos: [f32; 2], size: [f32; 2], radius: f32, color: Color) -> &'a Shape {
+        self.arena.alloc(Shape::FillPath(color, self.arena.alloc_slice(&[
             PathSegment([pos[0] + radius, pos[1]], SegmentType::Arc(radius, PI/2.0, PI)),
             PathSegment([pos[0], pos[1] + radius], SegmentType::Line),
             PathSegment([pos[0], pos[1] + size[1] - radius], SegmentType::Arc(radius, PI, 3.0*PI/2.0)),
@@ -298,8 +298,8 @@ impl Frame {
         ])))
     }
 
-    pub fn circle_fill<'a>(&'a self, pos: [f32; 2], radius: f32, color: Color) -> &'a Scene {
-        self.arena.alloc(Scene::FillPath(color, self.arena.alloc_slice(&[
+    pub fn circle_fill<'a>(&'a self, pos: [f32; 2], radius: f32, color: Color) -> &'a Shape {
+        self.arena.alloc(Shape::FillPath(color, self.arena.alloc_slice(&[
             PathSegment([pos[0] + radius, pos[1]], SegmentType::Arc(radius, 0.0, 2.0*PI)),
         ])))
     }
