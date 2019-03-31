@@ -71,51 +71,6 @@ impl Graphics {
             }
         }
 
-        let mut glyph_verts: Vec<VertexUV> = Vec::new();
-        let mut glyph_indices: Vec<u16> = Vec::new();
-        self.atlas.update_counter();
-
-        for (origin, color, glyph_list) in glyphs {
-            let col = color.to_linear();
-            for glyph in glyph_list {
-                let rect = if let Some(rect) = self.atlas.get_cached(glyph.id) {
-                    rect
-                } else {
-                    let font = self.fonts.get(glyph.id.font).unwrap();
-                    let bbox = font.get_bbox(glyph.id.glyph, glyph.id.scale).unwrap();
-                    let rect = self.atlas.insert(glyph.id, bbox.width() as u32, bbox.height() as u32).unwrap();
-                    let rendered = font.render_glyph(glyph.id.glyph, glyph.id.scale).unwrap();
-                    self.renderer.update_tex(self.atlas_tex, rect.x as usize, rect.y as usize, rendered.width as usize, rendered.height as usize, &rendered.data);
-                    rect
-                };
-
-                let i = glyph_verts.len() as u16;
-                let (u1, v1) = (rect.x as f32 / self.atlas.width as f32, (rect.y + rect.h) as f32 / self.atlas.height as f32);
-                let (u2, v2) = ((rect.x + rect.w) as f32 / self.atlas.width as f32, rect.y as f32 / self.atlas.height as f32);
-                let (x1, y1) = pixel_to_ndc(origin[0] + glyph.pos[0], origin[1] + glyph.pos[1], self.width, self.height);
-                let (x2, y2) = pixel_to_ndc(origin[0] + glyph.pos[0] + rect.w as f32, origin[1] + glyph.pos[1] + rect.h as f32, self.width, self.height);
-                glyph_verts.extend(&[VertexUV {
-                    pos: [x1, y1, 0.0],
-                    col,
-                    uv: [u1, v1],
-                }, VertexUV {
-                    pos: [x2, y1, 0.0],
-                    col,
-                    uv: [u2, v1],
-                }, VertexUV {
-                    pos: [x2, y2, 0.0],
-                    col,
-                    uv: [u2, v2],
-                }, VertexUV {
-                    pos: [x1, y2, 0.0],
-                    col,
-                    uv: [u1, v2],
-                }]);
-                glyph_indices.extend(&[i, i+1, i+2, i, i+2, i+3]);
-            }
-        }
-        self.renderer.draw_tex(&glyph_verts, &glyph_indices, self.atlas_tex);
-
         let mut path_verts: Vec<Vertex> = Vec::new();
         let mut path_indices: Vec<u16> = Vec::new();
         for (origin, color, path) in paths {
@@ -167,6 +122,51 @@ impl Graphics {
             }
         }
         self.renderer.draw(&path_verts, &path_indices);
+
+        let mut glyph_verts: Vec<VertexUV> = Vec::new();
+        let mut glyph_indices: Vec<u16> = Vec::new();
+        self.atlas.update_counter();
+
+        for (origin, color, glyph_list) in glyphs {
+            let col = color.to_linear();
+            for glyph in glyph_list {
+                let rect = if let Some(rect) = self.atlas.get_cached(glyph.id) {
+                    rect
+                } else {
+                    let font = self.fonts.get(glyph.id.font).unwrap();
+                    let bbox = font.get_bbox(glyph.id.glyph, glyph.id.scale).unwrap();
+                    let rect = self.atlas.insert(glyph.id, bbox.width() as u32, bbox.height() as u32).unwrap();
+                    let rendered = font.render_glyph(glyph.id.glyph, glyph.id.scale).unwrap();
+                    self.renderer.update_tex(self.atlas_tex, rect.x as usize, rect.y as usize, rendered.width as usize, rendered.height as usize, &rendered.data);
+                    rect
+                };
+
+                let i = glyph_verts.len() as u16;
+                let (u1, v1) = (rect.x as f32 / self.atlas.width as f32, (rect.y + rect.h) as f32 / self.atlas.height as f32);
+                let (u2, v2) = ((rect.x + rect.w) as f32 / self.atlas.width as f32, rect.y as f32 / self.atlas.height as f32);
+                let (x1, y1) = pixel_to_ndc(origin[0] + glyph.pos[0], origin[1] + glyph.pos[1], self.width, self.height);
+                let (x2, y2) = pixel_to_ndc(origin[0] + glyph.pos[0] + rect.w as f32, origin[1] + glyph.pos[1] + rect.h as f32, self.width, self.height);
+                glyph_verts.extend(&[VertexUV {
+                    pos: [x1, y1, 0.0],
+                    col,
+                    uv: [u1, v1],
+                }, VertexUV {
+                    pos: [x2, y1, 0.0],
+                    col,
+                    uv: [u2, v1],
+                }, VertexUV {
+                    pos: [x2, y2, 0.0],
+                    col,
+                    uv: [u2, v2],
+                }, VertexUV {
+                    pos: [x1, y2, 0.0],
+                    col,
+                    uv: [u1, v2],
+                }]);
+                glyph_indices.extend(&[i, i+1, i+2, i, i+2, i+3]);
+            }
+        }
+        self.renderer.draw_tex(&glyph_verts, &glyph_indices, self.atlas_tex);
     }
 
     pub fn text(&self, pos: [f32; 2], text: &str, font_id: FontId, scale: u32) -> Vec<Glyph> {
