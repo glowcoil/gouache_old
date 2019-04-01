@@ -28,7 +28,7 @@ fn main() {
     let dpi_factor = gl_window.get_hidpi_factor();
 
     let mut graphics = Graphics::new(size.width as f32, size.height as f32, dpi_factor as f32);
-    let font = graphics.add_font(include_bytes!("../sawarabi-gothic-medium.ttf"));
+    let font = graphics.add_font(include_bytes!("../res/sawarabi-gothic-medium.ttf"));
 
     const FRAME: std::time::Duration = std::time::Duration::from_micros(1_000_000 / 60);
     let mut frames: [u32; 100] = [0; 100];
