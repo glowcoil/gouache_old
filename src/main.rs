@@ -24,10 +24,9 @@ fn main() {
     unsafe { gl_window.make_current().unwrap(); }
     gl::load_with(|symbol| gl_window.get_proc_address(symbol) as *const _);
 
-    let size = gl_window.get_inner_size().unwrap();
     let dpi_factor = gl_window.get_hidpi_factor();
 
-    let mut graphics = Graphics::new(size.width as f32, size.height as f32, dpi_factor as f32);
+    let mut graphics = Graphics::new(dpi_factor as f32);
     let font = graphics.add_font(include_bytes!("../res/sawarabi-gothic-medium.ttf"));
 
     const FRAME: std::time::Duration = std::time::Duration::from_micros(1_000_000 / 60);
@@ -49,7 +48,8 @@ fn main() {
         {
             graphics.clear(Color::rgba(0.1, 0.15, 0.2, 1.0));
             let frame = Frame::new();
-            graphics.draw(frame.stack(&[
+            let size = gl_window.get_inner_size().unwrap();
+            graphics.draw(size.width as f32, size.height as f32, frame.stack(&[
                 frame.glyphs(&graphics.text([0.0, 10.0], "Jackdaws love my big sphinx of quartz.", font, 14), Color::rgba(0.8, 0.8, 0.8, 1.0)),
                 frame.glyphs(&graphics.text([700.0, 580.0], &fps_text, font, 14), Color::rgba(1.0, 1.0, 1.0, 1.0)),
                 frame.round_rect_fill([100.0, 100.0], [100.0, 100.0], 5.0, Color::rgba(0.8, 0.5, 0.0, 1.0)),
@@ -66,7 +66,6 @@ fn main() {
                     glutin::WindowEvent::CloseRequested => running = false,
                     glutin::WindowEvent::Resized(logical_size) => {
                         gl_window.resize(logical_size.to_physical(dpi_factor));
-                        graphics.set_size(logical_size.width as f32, logical_size.height as f32);
                     }
                     _ => (),
                 },

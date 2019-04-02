@@ -6,8 +6,6 @@ use std::f32::consts::PI;
 const TOLERANCE: f32 = 0.1;
 
 pub struct Graphics {
-    width: f32,
-    height: f32,
     dpi_factor: f32,
     renderer: Renderer,
     fonts: alloc::Slab<font_rs::font::Font<'static>>,
@@ -16,12 +14,10 @@ pub struct Graphics {
 }
 
 impl Graphics {
-    pub fn new(width: f32, height: f32, dpi_factor: f32) -> Graphics {
+    pub fn new(dpi_factor: f32) -> Graphics {
         let mut renderer = Renderer::new();
         let atlas_tex = renderer.create_tex(TexFormat::A, 1024, 1024, &[0; 1024*1024]);
         Graphics {
-            width,
-            height,
             dpi_factor,
             renderer,
             fonts: alloc::Slab::new(),
@@ -38,21 +34,16 @@ impl Graphics {
         self.fonts.remove(font);
     }
 
-    pub fn set_size(&mut self, width: f32, height: f32) {
-        self.width = width;
-        self.height = height;
-    }
-
     pub fn clear(&mut self, color: Color) {
         self.renderer.clear(color.to_linear());
     }
 
-    pub fn draw(&mut self, shape: &Shape) {
+    pub fn draw(&mut self, width: f32, height: f32, shape: &Shape) {
         let mut glyphs = Vec::new();
         let mut paths = Vec::new();
 
         walk(shape, [0.0, 0.0], &mut glyphs, &mut paths);
-        fn walk<'a>(shape: &'a Shape, origin: [f32; 2], glyphs: &mut Vec<([f32; 2], Color,  &'a [Glyph])>, paths: &mut Vec<([f32; 2], Color, &'a [PathSegment])>) {
+        fn walk<'a>(shape: &'a Shape, origin: [f32; 2], glyphs: &mut Vec<([f32; 2], Color, &'a [Glyph])>, paths: &mut Vec<([f32; 2], Color, &'a [PathSegment])>) {
             match shape {
                 Shape::Stack(children) => {
                     for child in *children {
@@ -106,8 +97,8 @@ impl Graphics {
                 let prev_normal = normalized([prev[1] - curr[1], curr[0] - prev[0]]);
                 let next_normal = normalized([curr[1] - next[1], next[0] - curr[0]]);
                 let normal = normalized([(prev_normal[0] + next_normal[0]) / 2.0, (prev_normal[1] + next_normal[1]) / 2.0]);
-                let (inner_x, inner_y) = pixel_to_ndc(origin[0] + curr[0] - 0.5 * normal[0], origin[1] + curr[1] - 0.5 * normal[1], self.width, self.height);
-                let (outer_x, outer_y) = pixel_to_ndc(origin[0] + curr[0] + 0.5 * normal[0], origin[1] + curr[1] + 0.5 * normal[1], self.width, self.height);
+                let (inner_x, inner_y) = pixel_to_ndc(origin[0] + curr[0] - 0.5 * normal[0], origin[1] + curr[1] - 0.5 * normal[1], width, height);
+                let (outer_x, outer_y) = pixel_to_ndc(origin[0] + curr[0] + 0.5 * normal[0], origin[1] + curr[1] + 0.5 * normal[1], width, height);
                 path_verts.push(Vertex { pos: [inner_x, inner_y, 0.0], col });
                 path_verts.push(Vertex { pos: [outer_x, outer_y, 0.0], col: col_alpha });
             }
@@ -144,8 +135,8 @@ impl Graphics {
                 let i = glyph_verts.len() as u16;
                 let (u1, v1) = (rect.x as f32 / self.atlas.width as f32, (rect.y + rect.h) as f32 / self.atlas.height as f32);
                 let (u2, v2) = ((rect.x + rect.w) as f32 / self.atlas.width as f32, rect.y as f32 / self.atlas.height as f32);
-                let (x1, y1) = pixel_to_ndc(origin[0] + glyph.pos[0], origin[1] + glyph.pos[1], self.width, self.height);
-                let (x2, y2) = pixel_to_ndc(origin[0] + glyph.pos[0] + rect.w as f32, origin[1] + glyph.pos[1] + rect.h as f32, self.width, self.height);
+                let (x1, y1) = pixel_to_ndc(origin[0] + glyph.pos[0], origin[1] + glyph.pos[1], width, height);
+                let (x2, y2) = pixel_to_ndc(origin[0] + glyph.pos[0] + rect.w as f32, origin[1] + glyph.pos[1] + rect.h as f32, width, height);
                 glyph_verts.extend(&[VertexUV {
                     pos: [x1, y1, 0.0],
                     col,
