@@ -50,6 +50,11 @@ impl Graphics {
                         walk(child, origin, glyphs, paths);
                     }
                 }
+                Shape::Group(children) => {
+                    for child in *children {
+                        walk(child, origin, glyphs, paths);
+                    }
+                }
                 Shape::Translate(offset, child) => {
                     walk(child, [origin[0] + offset[0], origin[1] + offset[1]], glyphs, paths);
                 }
@@ -205,6 +210,7 @@ fn normalized(p: [f32; 2]) -> [f32; 2] {
 #[derive(Copy, Clone)]
 pub enum Shape<'a> {
     Stack(&'a [&'a Shape<'a>]),
+    Group(&'a [&'a Shape<'a>]),
     Translate([f32; 2], &'a Shape<'a>),
     Glyphs(Color, &'a [Glyph]),
     FillPath(Color, &'a [PathSegment]),
@@ -257,6 +263,10 @@ impl Frame {
 
     pub fn stack<'a>(&'a self, children: &[&'a Shape]) -> &'a Shape {
         self.arena.alloc(Shape::Stack(self.arena.alloc_slice(children)))
+    }
+
+    pub fn group<'a>(&'a self, children: &[&'a Shape]) -> &'a Shape {
+        self.arena.alloc(Shape::Group(self.arena.alloc_slice(children)))
     }
 
     pub fn translate<'a>(&'a self, offset: [f32; 2], child: &'a Shape) -> &'a Shape {
