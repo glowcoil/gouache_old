@@ -255,7 +255,7 @@ impl Frame {
         }
     }
 
-    pub fn stack<'a>(&'a self, children: &'a [&'a Shape]) -> &'a Shape {
+    pub fn stack<'a>(&'a self, children: &[&'a Shape]) -> &'a Shape {
         self.arena.alloc(Shape::Stack(self.arena.alloc_slice(children)))
     }
 
