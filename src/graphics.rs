@@ -1,5 +1,5 @@
 use crate::render::*;
-use crate::alloc;
+use crate::alloc::*;
 
 use std::f32::consts::PI;
 
@@ -8,7 +8,7 @@ const TOLERANCE: f32 = 0.1;
 pub struct Graphics {
     dpi_factor: f32,
     renderer: Renderer,
-    fonts: alloc::Slab<font_rs::font::Font<'static>>,
+    fonts: Slab<font_rs::font::Font<'static>>,
     atlas: Atlas,
     atlas_tex: TexId,
 }
@@ -20,7 +20,7 @@ impl Graphics {
         Graphics {
             dpi_factor,
             renderer,
-            fonts: alloc::Slab::new(),
+            fonts: Slab::new(),
             atlas: Atlas::new(1024, 1024),
             atlas_tex,
         }
@@ -245,13 +245,13 @@ enum SegmentType {
 }
 
 pub struct Frame {
-    arena: alloc::Arena,
+    arena: Arena,
 }
 
 impl Frame {
     pub fn new() -> Frame {
         Frame {
-            arena: alloc::Arena::with_capacity(1024),
+            arena: Arena::with_capacity(1024),
         }
     }
 
@@ -309,7 +309,7 @@ pub struct GlyphId {
 struct Atlas {
     width: u32,
     height: u32,
-    rows: alloc::Slab<Row>,
+    rows: Slab<Row>,
     rows_by_height: Vec<usize>,
     next_y: u32,
     map: std::collections::HashMap<GlyphId, Entry>,
@@ -319,14 +319,14 @@ struct Atlas {
 struct Row {
     y: u32,
     height: u32,
-    glyphs: alloc::Slab<AtlasGlyph>,
+    glyphs: Slab<AtlasGlyph>,
     next_x: u32,
     last_used: usize,
 }
 
 impl Row {
     fn new(y: u32, height: u32) -> Row {
-        Row { y, height, glyphs: alloc::Slab::new(), next_x: 0, last_used: 0 }
+        Row { y, height, glyphs: Slab::new(), next_x: 0, last_used: 0 }
     }
 }
 
@@ -349,7 +349,7 @@ impl Atlas {
         Atlas {
             width,
             height,
-            rows: alloc::Slab::new(),
+            rows: Slab::new(),
             rows_by_height: Vec::new(),
             next_y: 0,
             map: std::collections::HashMap::new(),
