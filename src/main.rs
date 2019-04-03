@@ -45,18 +45,14 @@ fn main() {
         let fps = 100000.0 / (sum as f32);
         let fps_text = fps.round().to_string();
 
-        {
-            graphics.clear(Color::rgba(0.1, 0.15, 0.2, 1.0));
-            let frame = Frame::new();
-            let size = gl_window.get_inner_size().unwrap();
-            graphics.draw(size.width as f32, size.height as f32, frame.stack(&[
-                frame.glyphs(&graphics.text([0.0, 10.0], "Jackdaws love my big sphinx of quartz.", font, 14), Color::rgba(0.8, 0.8, 0.8, 1.0)),
-                frame.glyphs(&graphics.text([700.0, 580.0], &fps_text, font, 14), Color::rgba(1.0, 1.0, 1.0, 1.0)),
-                frame.round_rect_fill([100.0, 100.0], [100.0, 100.0], 5.0, Color::rgba(0.8, 0.5, 0.0, 1.0)),
-                frame.circle_fill([225.0, 225.0], 101.0, Color::rgba(0.5, 0.25, 1.0, 0.75)),
-                frame.translate([300.0, 100.0], frame.circle_fill([0.0, 0.0], 150.0, Color::rgba(0.0, 0.5, 1.0, 0.5))),
-            ]));
-        }
+        graphics.clear(Color::rgba(0.1, 0.15, 0.2, 1.0));
+        graphics.text([0.0, 0.0], "Jackdaws love my big sphinx of quartz.", font, 14, Color::rgba(0.8, 0.8, 0.8, 1.0));
+        graphics.text([700.0, 580.0], &fps_text, font, 14, Color::rgba(1.0, 1.0, 1.0, 1.0));
+        graphics.round_rect_fill([100.0, 100.0], [100.0, 100.0], 5.0, Color::rgba(0.8, 0.5, 0.0, 1.0));
+        graphics.circle_fill([225.0, 225.0], 101.0, Color::rgba(0.5, 0.25, 1.0, 0.75));
+        graphics.circle_fill([300.0, 100.0], 150.0, Color::rgba(0.0, 0.5, 1.0, 0.5));
+        let size = gl_window.get_inner_size().unwrap();
+        graphics.draw(size.width as f32, size.height as f32);
 
         gl_window.swap_buffers().unwrap();
 

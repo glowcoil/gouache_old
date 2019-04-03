@@ -11,6 +11,12 @@ pub struct Graphics {
     fonts: Slab<font_rs::font::Font<'static>>,
     atlas: Atlas,
     atlas_tex: TexId,
+
+    layers: Vec<(usize, usize)>,
+    stack: Vec<usize>,
+    items: Vec<DisplayItem>,
+    glyphs: Vec<Glyph>,
+    paths: Vec<PathSegment>,
 }
 
 impl Graphics {
@@ -23,6 +29,12 @@ impl Graphics {
             fonts: Slab::new(),
             atlas: Atlas::new(1024, 1024),
             atlas_tex,
+
+            layers: Vec::new(),
+            stack: Vec::new(),
+            items: Vec::new(),
+            glyphs: Vec::new(),
+            paths: Vec::new(),
         }
     }
 
@@ -38,38 +50,24 @@ impl Graphics {
         self.renderer.clear(color.to_linear());
     }
 
-    pub fn draw(&mut self, width: f32, height: f32, shape: &Shape) {
+    pub fn draw(&mut self, width: f32, height: f32) {
         let mut glyphs = Vec::new();
         let mut paths = Vec::new();
 
-        walk(shape, [0.0, 0.0], &mut glyphs, &mut paths);
-        fn walk<'a>(shape: &'a Shape, origin: [f32; 2], glyphs: &mut Vec<([f32; 2], Color, &'a [Glyph])>, paths: &mut Vec<([f32; 2], Color, &'a [PathSegment])>) {
-            match shape {
-                Shape::Stack(children) => {
-                    for child in *children {
-                        walk(child, origin, glyphs, paths);
-                    }
+        for item in self.items.iter() {
+            match item {
+                DisplayItem::Glyphs(color, start, end) => {
+                    glyphs.push((color, &self.glyphs[*start..*end]));
                 }
-                Shape::Group(children) => {
-                    for child in *children {
-                        walk(child, origin, glyphs, paths);
-                    }
-                }
-                Shape::Translate(offset, child) => {
-                    walk(child, [origin[0] + offset[0], origin[1] + offset[1]], glyphs, paths);
-                }
-                Shape::Glyphs(color, gs) => {
-                    glyphs.push((origin, *color, gs));
-                }
-                Shape::FillPath(color, path) => {
-                    paths.push((origin, *color, path));
+                DisplayItem::FillPath(color, start, end) => {
+                    paths.push((color, &self.paths[*start..*end]));
                 }
             }
         }
 
         let mut path_verts: Vec<Vertex> = Vec::new();
         let mut path_indices: Vec<u16> = Vec::new();
-        for (origin, color, path) in paths {
+        for (color, path) in paths {
             let col = color.to_linear();
             let mut col_alpha = col;
             col_alpha[3] = 0.0;
@@ -102,16 +100,16 @@ impl Graphics {
                 let prev_normal = normalized([prev[1] - curr[1], curr[0] - prev[0]]);
                 let next_normal = normalized([curr[1] - next[1], next[0] - curr[0]]);
                 let normal = normalized([(prev_normal[0] + next_normal[0]) / 2.0, (prev_normal[1] + next_normal[1]) / 2.0]);
-                let (inner_x, inner_y) = pixel_to_ndc(origin[0] + curr[0] - 0.5 * normal[0], origin[1] + curr[1] - 0.5 * normal[1], width, height);
-                let (outer_x, outer_y) = pixel_to_ndc(origin[0] + curr[0] + 0.5 * normal[0], origin[1] + curr[1] + 0.5 * normal[1], width, height);
+                let (inner_x, inner_y) = pixel_to_ndc(curr[0] - 0.5 * normal[0], curr[1] - 0.5 * normal[1], width, height);
+                let (outer_x, outer_y) = pixel_to_ndc(curr[0] + 0.5 * normal[0], curr[1] + 0.5 * normal[1], width, height);
                 path_verts.push(Vertex { pos: [inner_x, inner_y, 0.0], col });
                 path_verts.push(Vertex { pos: [outer_x, outer_y, 0.0], col: col_alpha });
             }
             for i in 1..verts.len().saturating_sub(1) {
-                path_indices.extend(&[path_start as u16, (path_start + 2*i) as u16, (path_start + 2*i + 2) as u16]);
+                path_indices.extend_from_slice(&[path_start as u16, (path_start + 2*i) as u16, (path_start + 2*i + 2) as u16]);
             }
             for i in 0..verts.len() {
-                path_indices.extend(&[
+                path_indices.extend_from_slice(&[
                     (path_start + 2*i) as u16, (path_start + 2*i + 1) as u16, (path_start + 2*((i+1)%verts.len()) + 1) as u16,
                     (path_start + 2*i) as u16, (path_start + 2*((i+1)%verts.len()) + 1) as u16, (path_start + 2*((i+1)%verts.len())) as u16,
                 ]);
@@ -123,9 +121,9 @@ impl Graphics {
         let mut glyph_indices: Vec<u16> = Vec::new();
         self.atlas.update_counter();
 
-        for (origin, color, glyph_list) in glyphs {
+        for (color, glyph_list) in glyphs {
             let col = color.to_linear();
-            for glyph in glyph_list {
+            for glyph in glyph_list.iter() {
                 let rect = if let Some(rect) = self.atlas.get_cached(glyph.id) {
                     rect
                 } else {
@@ -140,9 +138,9 @@ impl Graphics {
                 let i = glyph_verts.len() as u16;
                 let (u1, v1) = (rect.x as f32 / self.atlas.width as f32, (rect.y + rect.h) as f32 / self.atlas.height as f32);
                 let (u2, v2) = ((rect.x + rect.w) as f32 / self.atlas.width as f32, rect.y as f32 / self.atlas.height as f32);
-                let (x1, y1) = pixel_to_ndc(origin[0] + glyph.pos[0], origin[1] + glyph.pos[1], width, height);
-                let (x2, y2) = pixel_to_ndc(origin[0] + glyph.pos[0] + rect.w as f32, origin[1] + glyph.pos[1] + rect.h as f32, width, height);
-                glyph_verts.extend(&[VertexUV {
+                let (x1, y1) = pixel_to_ndc(glyph.pos[0], glyph.pos[1], width, height);
+                let (x2, y2) = pixel_to_ndc(glyph.pos[0] + rect.w as f32, glyph.pos[1] + rect.h as f32, width, height);
+                glyph_verts.extend_from_slice(&[VertexUV {
                     pos: [x1, y1, 0.0],
                     col,
                     uv: [u1, v1],
@@ -159,29 +157,70 @@ impl Graphics {
                     col,
                     uv: [u1, v2],
                 }]);
-                glyph_indices.extend(&[i, i+1, i+2, i, i+2, i+3]);
+                glyph_indices.extend_from_slice(&[i, i+1, i+2, i, i+2, i+3]);
             }
         }
         self.renderer.draw_tex(&glyph_verts, &glyph_indices, self.atlas_tex);
+
+        self.layers = Vec::new();
+        self.stack = Vec::new();
+        self.items = Vec::new();
+        self.glyphs = Vec::new();
+        self.paths = Vec::new();
     }
 
-    pub fn text(&self, pos: [f32; 2], text: &str, font_id: FontId, scale: u32) -> Vec<Glyph> {
+    pub fn text(&mut self, pos: [f32; 2], text: &str, font_id: FontId, scale: u32, color: Color) {
         let font = self.fonts.get(font_id).unwrap();
         let mut pos = pos;
-        let mut glyphs = Vec::with_capacity(text.len());
+        let start = self.glyphs.len();
+        self.glyphs.reserve(text.len());
         for c in text.chars() {
             let glyph = font.lookup_glyph_id(c as u32).unwrap();
             let h_metrics = font.get_h_metrics(glyph, scale).unwrap();
             let v_metrics = font.get_v_metrics(scale).unwrap();
             if let Some(bbox) = font.get_bbox(glyph, scale) {
-                glyphs.push(Glyph {
+                self.glyphs.push(Glyph {
                     id: GlyphId { font: font_id, scale, glyph },
                     pos: [pos[0] + bbox.l as f32, pos[1] + bbox.t as f32 + v_metrics.ascent as f32],
                 });
             }
             pos[0] += h_metrics.advance_width;
         }
-        glyphs
+        self.items.push(DisplayItem::Glyphs(color, start, self.glyphs.len()));
+    }
+
+    pub fn rect_fill(&mut self, pos: [f32; 2], size: [f32; 2], color: Color) {
+        let start = self.paths.len();
+        self.paths.extend_from_slice(&[
+            PathSegment([pos[0], pos[1]], SegmentType::Line),
+            PathSegment([pos[0], pos[1] + size[1]], SegmentType::Line),
+            PathSegment([pos[0] + size[0], pos[1] + size[1]], SegmentType::Line),
+            PathSegment([pos[0] + size[0], pos[1]], SegmentType::Line),
+        ]);
+        self.items.push(DisplayItem::FillPath(color, start, self.paths.len()));
+    }
+
+    pub fn round_rect_fill(&mut self, pos: [f32; 2], size: [f32; 2], radius: f32, color: Color) {
+        let start = self.paths.len();
+        self.paths.extend_from_slice(&[
+            PathSegment([pos[0] + radius, pos[1]], SegmentType::Arc(radius, PI/2.0, PI)),
+            PathSegment([pos[0], pos[1] + radius], SegmentType::Line),
+            PathSegment([pos[0], pos[1] + size[1] - radius], SegmentType::Arc(radius, PI, 3.0*PI/2.0)),
+            PathSegment([pos[0] + radius, pos[1] + size[1]], SegmentType::Line),
+            PathSegment([pos[0] + size[0] - radius, pos[1] + size[1]], SegmentType::Arc(radius, 3.0*PI/2.0, 2.0*PI)),
+            PathSegment([pos[0] + size[0], pos[1] + size[1] - radius], SegmentType::Line),
+            PathSegment([pos[0] + size[0], pos[1] + radius], SegmentType::Arc(radius, 0.0, PI/2.0)),
+            PathSegment([pos[0] + size[0] - radius, pos[1]], SegmentType::Line),
+        ]);
+        self.items.push(DisplayItem::FillPath(color, start, self.paths.len()));
+    }
+
+    pub fn circle_fill(&mut self, pos: [f32; 2], radius: f32, color: Color) {
+        let start = self.paths.len();
+        self.paths.extend_from_slice(&[
+            PathSegment([pos[0] + radius, pos[1]], SegmentType::Arc(radius, 0.0, 2.0*PI)),
+        ]);
+        self.items.push(DisplayItem::FillPath(color, start, self.paths.len()));
     }
 }
 
@@ -208,12 +247,9 @@ fn normalized(p: [f32; 2]) -> [f32; 2] {
 
 
 #[derive(Copy, Clone)]
-pub enum Shape<'a> {
-    Stack(&'a [&'a Shape<'a>]),
-    Group(&'a [&'a Shape<'a>]),
-    Translate([f32; 2], &'a Shape<'a>),
-    Glyphs(Color, &'a [Glyph]),
-    FillPath(Color, &'a [PathSegment]),
+pub enum DisplayItem {
+    Glyphs(Color, usize, usize),
+    FillPath(Color, usize, usize),
 }
 
 #[derive(Copy, Clone)]
@@ -248,62 +284,6 @@ struct PathSegment([f32; 2], SegmentType);
 enum SegmentType {
     Line,
     Arc(f32, f32, f32),
-}
-
-pub struct Frame {
-    arena: Arena,
-}
-
-impl Frame {
-    pub fn new() -> Frame {
-        Frame {
-            arena: Arena::with_capacity(1024),
-        }
-    }
-
-    pub fn stack<'a>(&'a self, children: &[&'a Shape]) -> &'a Shape {
-        self.arena.alloc(Shape::Stack(self.arena.alloc_slice(children)))
-    }
-
-    pub fn group<'a>(&'a self, children: &[&'a Shape]) -> &'a Shape {
-        self.arena.alloc(Shape::Group(self.arena.alloc_slice(children)))
-    }
-
-    pub fn translate<'a>(&'a self, offset: [f32; 2], child: &'a Shape) -> &'a Shape {
-        self.arena.alloc(Shape::Translate(offset, child))
-    }
-
-    pub fn glyphs<'a>(&'a self, glyphs: &[Glyph], color: Color) -> &'a Shape {
-        self.arena.alloc(Shape::Glyphs(color, self.arena.alloc_slice(glyphs)))
-    }
-
-    pub fn rect_fill<'a>(&'a self, pos: [f32; 2], size: [f32; 2], color: Color) -> &'a Shape {
-        self.arena.alloc(Shape::FillPath(color, self.arena.alloc_slice(&[
-            PathSegment([pos[0], pos[1]], SegmentType::Line),
-            PathSegment([pos[0], pos[1] + size[1]], SegmentType::Line),
-            PathSegment([pos[0] + size[0], pos[1] + size[1]], SegmentType::Line),
-            PathSegment([pos[0] + size[0], pos[1]], SegmentType::Line),
-        ])))
-    }
-
-    pub fn round_rect_fill<'a>(&'a self, pos: [f32; 2], size: [f32; 2], radius: f32, color: Color) -> &'a Shape {
-        self.arena.alloc(Shape::FillPath(color, self.arena.alloc_slice(&[
-            PathSegment([pos[0] + radius, pos[1]], SegmentType::Arc(radius, PI/2.0, PI)),
-            PathSegment([pos[0], pos[1] + radius], SegmentType::Line),
-            PathSegment([pos[0], pos[1] + size[1] - radius], SegmentType::Arc(radius, PI, 3.0*PI/2.0)),
-            PathSegment([pos[0] + radius, pos[1] + size[1]], SegmentType::Line),
-            PathSegment([pos[0] + size[0] - radius, pos[1] + size[1]], SegmentType::Arc(radius, 3.0*PI/2.0, 2.0*PI)),
-            PathSegment([pos[0] + size[0], pos[1] + size[1] - radius], SegmentType::Line),
-            PathSegment([pos[0] + size[0], pos[1] + radius], SegmentType::Arc(radius, 0.0, PI/2.0)),
-            PathSegment([pos[0] + size[0] - radius, pos[1]], SegmentType::Line),
-        ])))
-    }
-
-    pub fn circle_fill<'a>(&'a self, pos: [f32; 2], radius: f32, color: Color) -> &'a Shape {
-        self.arena.alloc(Shape::FillPath(color, self.arena.alloc_slice(&[
-            PathSegment([pos[0] + radius, pos[1]], SegmentType::Arc(radius, 0.0, 2.0*PI)),
-        ])))
-    }
 }
 
 
