@@ -1,3 +1,124 @@
+use crate::graphics::*;
+
+pub struct UI {
+    graphics: Graphics,
+}
+
+impl UI {
+    pub fn new(dpi_factor: f32) -> UI {
+        UI {
+            graphics: Graphics::new(dpi_factor),
+        }
+    }
+
+    pub fn graphics(&mut self) -> &mut Graphics {
+        &mut self.graphics
+    }
+}
+
+#[derive(Copy, Clone, Debug)]
+pub struct Rect {
+    pub left: f32,
+    pub top: f32,
+    pub right: f32,
+    pub bottom: f32,
+}
+
+pub trait Widget {
+    fn size(&self, ui: &mut UI, bounds: Rect) -> Rect;
+    fn draw(&self, ui: &mut UI, bounds: Rect) -> Rect;
+}
+
+
+pub struct Padding<W: Widget> {
+    padding: Rect,
+    child: W,
+}
+
+impl<W: Widget> Padding<W> {
+    pub fn new(left: f32, top: f32, right: f32, bottom: f32, child: W) -> Padding<W> {
+        Padding {
+            padding: Rect { left, top, right, bottom },
+            child: child,
+        }
+    }
+
+    pub fn uniform(padding: f32, child: W) -> Padding<W> {
+        Padding::new(padding, padding, padding, padding, child)
+    }
+
+    fn inner_rect(&self, rect: Rect) -> Rect {
+        Rect {
+            left: rect.left + self.padding.left, top: rect.top + self.padding.top,
+            right: rect.right - self.padding.right, bottom: rect.bottom - self.padding.bottom,
+        }
+    }
+
+    fn outer_rect(&self, rect: Rect) -> Rect {
+        Rect {
+            left: rect.left - self.padding.left, top: rect.top - self.padding.top,
+            right: rect.right + self.padding.right, bottom: rect.bottom + self.padding.bottom,
+        }
+    }
+}
+
+impl<W: Widget> Widget for Padding<W> {
+    fn size(&self, ui: &mut UI, bounds: Rect) -> Rect {
+        self.outer_rect(self.child.size(ui, self.inner_rect(bounds)))
+    }
+
+    fn draw(&self, ui: &mut UI, bounds: Rect) -> Rect {
+        self.outer_rect(self.child.draw(ui, self.inner_rect(bounds)))
+    }
+}
+
+pub struct Text<'a> {
+    text: &'a str,
+    font: FontId,
+    scale: u32,
+    color: Color,
+}
+
+impl<'a> Text<'a> {
+    pub fn new(text: &'a str, font: FontId, scale: u32, color: Color) -> Text<'a> {
+        Text { text, font, scale, color }
+    }
+
+    fn rect(bounds: Rect, width: f32, height: f32) -> Rect {
+        let mut rect = bounds;
+        if rect.left.is_infinite() {
+            rect.left = rect.right - width;
+        } else if rect.right.is_infinite() {
+            rect.right = rect.left + width;
+        }
+        if rect.top.is_infinite() {
+            rect.top = rect.bottom - height;
+        } else if rect.bottom.is_infinite() {
+            rect.bottom = rect.top + height;
+        }
+        rect
+    }
+}
+
+impl<'a> Widget for Text<'a> {
+    fn size(&self, ui: &mut UI, bounds: Rect) -> Rect {
+        let (width, height) = ui.graphics().text_size(self.text, self.font, self.scale);
+        Self::rect(bounds, width, height)
+    }
+
+    fn draw(&self, ui: &mut UI, bounds: Rect) -> Rect {
+        let (width, height) = ui.graphics().text_size(self.text, self.font, self.scale);
+        let rect = Self::rect(bounds, width, height);
+        let x_space = (rect.right - rect.left) - width;
+        let x = if x_space > 0.0 { x_space / 2.0 } else { rect.left };
+        let y_space = (rect.bottom - rect.top) - height;
+        let y = if y_space > 0.0 { y_space / 2.0 } else { rect.top };
+        ui.graphics().text([x, y], self.text, self.font, self.scale, self.color);
+        rect
+    }
+}
+
+
 pub enum Key {
     Key0,
     Key1,
