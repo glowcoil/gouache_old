@@ -169,6 +169,18 @@ impl Graphics {
         self.paths = Vec::new();
     }
 
+    pub fn text_size(&self, text: &str, font_id: FontId, scale: u32) -> (f32, f32) {
+        let font = self.fonts.get(font_id).unwrap();
+        let mut width = 0.0;
+        for c in text.chars() {
+            let glyph = font.lookup_glyph_id(c as u32).unwrap();
+            let h_metrics = font.get_h_metrics(glyph, scale).unwrap();
+            width += h_metrics.advance_width;
+        }
+        let v_metrics = font.get_v_metrics(scale).unwrap();
+        (width, v_metrics.ascent - v_metrics.descent)
+    }
+
     pub fn text(&mut self, pos: [f32; 2], text: &str, font_id: FontId, scale: u32, color: Color) {
         let font = self.fonts.get(font_id).unwrap();
         let mut pos = pos;
