@@ -57,9 +57,8 @@ fn main() {
         // graphics.draw(size.width as f32, size.height as f32);
 
         ui.graphics().clear(Color::rgba(0.1, 0.15, 0.2, 1.0));
-        Padding::uniform(10.0, Text::new(&fps_text, font, 14, Color::rgba(1.0, 1.0, 1.0, 1.0)))
-            .draw(&mut ui, Rect { left: 0.0, top: 0.0, right: size.width as f32, bottom: size.height as f32 });
-        ui.graphics().draw(size.width as f32, size.height as f32);
+        let tree = Padding::new(20.0, 30.0, 0.0, 0.0, Text::new(&fps_text, font, 14, Color::rgba(1.0, 1.0, 1.0, 1.0)));
+        ui.run(size.width as f32, size.height as f32, &tree);
 
         gl_window.swap_buffers().unwrap();
 

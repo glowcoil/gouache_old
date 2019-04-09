@@ -2,43 +2,125 @@ use crate::graphics::*;
 
 pub struct UI {
     graphics: Graphics,
+    tree: Vec<Node>,
 }
 
 impl UI {
     pub fn new(dpi_factor: f32) -> UI {
         UI {
             graphics: Graphics::new(dpi_factor),
+            tree: Vec::new(),
         }
     }
 
     pub fn graphics(&mut self) -> &mut Graphics {
         &mut self.graphics
     }
+
+    pub fn run(&mut self, width: f32, height: f32, root: &dyn Widget) {
+        self.tree = vec![Node {
+            rect: Rect { x: 0.0, y: 0.0, width: 0.0, height: 0.0 },
+            start: 0,
+            len: 0,
+        }];
+        root.layout(&mut Context { graphics: &mut self.graphics, tree: &mut self.tree, index: 0 }, width, height);
+        self.update_offsets(0, 0.0, 0.0);
+        root.render(&mut Context { graphics: &mut self.graphics, tree: &mut self.tree, index: 0 });
+        self.graphics.draw(width, height);
+    }
+
+    fn update_offsets(&mut self, i: usize, x: f32, y: f32) {
+        let mut node = &mut self.tree[i];
+        node.rect.x += x; node.rect.y += y;
+        let (x, y) = (node.rect.x, node.rect.y);
+        for i in node.start..node.start+node.len {
+            self.update_offsets(i, x, y);
+        }
+    }
+}
+
+pub struct Context<'a> {
+    graphics: &'a mut Graphics,
+    tree: &'a mut Vec<Node>,
+    index: usize,
+}
+
+impl<'a> Context<'a> {
+    pub fn graphics<'b>(&'b mut self) -> &'b mut Graphics {
+        self.graphics
+    }
+
+    pub fn children(&mut self, children: usize) {
+        let start = self.tree.len();
+        self.tree.resize(start + children, Node {
+            rect: Rect { x: 0.0, y: 0.0, width: 0.0, height: 0.0 },
+            start: 0,
+            len: 0,
+        });
+        let mut node = &mut self.tree[self.index];
+        node.start = start;
+        node.len = children;
+    }
+
+    pub fn child<'b>(&'b mut self, index: usize) -> Context<'b> {
+        let (len, start) = (self.tree[self.index].len, self.tree[self.index].start);
+        assert!(index < len, "child index out of range");
+        Context {
+            graphics: self.graphics,
+            tree: self.tree,
+            index: start + index,
+        }
+    }
+
+    pub fn offset(&mut self, index: usize, x: f32, y: f32) {
+        let (len, start) = (self.tree[self.index].len, self.tree[self.index].start);
+        assert!(index < len, "child index out of range");
+        let mut node = &mut self.tree[start + index];
+        node.rect.x = x;
+        node.rect.y = y;
+    }
+
+    pub fn size(&mut self, width: f32, height: f32) {
+        let mut node = &mut self.tree[self.index];
+        node.rect.width = width;
+        node.rect.height = height;
+    }
+
+    pub fn rect(&self) -> Rect {
+        self.tree[self.index].rect
+    }
+}
+
+#[derive(Clone)]
+pub struct Node {
+    rect: Rect,
+    start: usize,
+    len: usize,
 }
 
 #[derive(Copy, Clone, Debug)]
 pub struct Rect {
-    pub left: f32,
-    pub top: f32,
-    pub right: f32,
-    pub bottom: f32,
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
 }
 
 pub trait Widget {
-    fn size(&self, ui: &mut UI, bounds: Rect) -> Rect;
-    fn draw(&self, ui: &mut UI, bounds: Rect) -> Rect;
+    fn layout(&self, context: &mut Context, max_width: f32, max_height: f32);
+    fn render(&self, context: &mut Context);
 }
 
 
 pub struct Padding<W: Widget> {
-    padding: Rect,
+    padding: (f32, f32, f32, f32),
     child: W,
 }
 
 impl<W: Widget> Padding<W> {
     pub fn new(left: f32, top: f32, right: f32, bottom: f32, child: W) -> Padding<W> {
         Padding {
-            padding: Rect { left, top, right, bottom },
+            padding: (left, top, right, bottom),
             child: child,
         }
     }
@@ -46,29 +128,17 @@ impl<W: Widget> Padding<W> {
     pub fn uniform(padding: f32, child: W) -> Padding<W> {
         Padding::new(padding, padding, padding, padding, child)
     }
-
-    fn inner_rect(&self, rect: Rect) -> Rect {
-        Rect {
-            left: rect.left + self.padding.left, top: rect.top + self.padding.top,
-            right: rect.right - self.padding.right, bottom: rect.bottom - self.padding.bottom,
-        }
-    }
-
-    fn outer_rect(&self, rect: Rect) -> Rect {
-        Rect {
-            left: rect.left - self.padding.left, top: rect.top - self.padding.top,
-            right: rect.right + self.padding.right, bottom: rect.bottom + self.padding.bottom,
-        }
-    }
 }
 
 impl<W: Widget> Widget for Padding<W> {
-    fn size(&self, ui: &mut UI, bounds: Rect) -> Rect {
-        self.outer_rect(self.child.size(ui, self.inner_rect(bounds)))
+    fn layout(&self, context: &mut Context, max_width: f32, max_height: f32) {
+        context.children(1);
+        self.child.layout(&mut context.child(0), max_width - self.padding.0 - self.padding.2, max_height - self.padding.1 - self.padding.3);
+        context.offset(0, self.padding.0, self.padding.1);
     }
 
-    fn draw(&self, ui: &mut UI, bounds: Rect) -> Rect {
-        self.outer_rect(self.child.draw(ui, self.inner_rect(bounds)))
+    fn render(&self, context: &mut Context) {
+        self.child.render(&mut context.child(0));
     }
 }
 
@@ -83,38 +153,17 @@ impl<'a> Text<'a> {
     pub fn new(text: &'a str, font: FontId, scale: u32, color: Color) -> Text<'a> {
         Text { text, font, scale, color }
     }
-
-    fn rect(bounds: Rect, width: f32, height: f32) -> Rect {
-        let mut rect = bounds;
-        if rect.left.is_infinite() {
-            rect.left = rect.right - width;
-        } else if rect.right.is_infinite() {
-            rect.right = rect.left + width;
-        }
-        if rect.top.is_infinite() {
-            rect.top = rect.bottom - height;
-        } else if rect.bottom.is_infinite() {
-            rect.bottom = rect.top + height;
-        }
-        rect
-    }
 }
 
 impl<'a> Widget for Text<'a> {
-    fn size(&self, ui: &mut UI, bounds: Rect) -> Rect {
-        let (width, height) = ui.graphics().text_size(self.text, self.font, self.scale);
-        Self::rect(bounds, width, height)
+    fn layout(&self, context: &mut Context, max_width: f32, max_height: f32) {
+        let (width, height) = context.graphics().text_size(self.text, self.font, self.scale);
+        context.size(width, height);
     }
 
-    fn draw(&self, ui: &mut UI, bounds: Rect) -> Rect {
-        let (width, height) = ui.graphics().text_size(self.text, self.font, self.scale);
-        let rect = Self::rect(bounds, width, height);
-        let x_space = (rect.right - rect.left) - width;
-        let x = if x_space > 0.0 { x_space / 2.0 } else { rect.left };
-        let y_space = (rect.bottom - rect.top) - height;
-        let y = if y_space > 0.0 { y_space / 2.0 } else { rect.top };
-        ui.graphics().text([x, y], self.text, self.font, self.scale, self.color);
-        rect
+    fn render(&self, context: &mut Context) {
+        let rect = context.rect();
+        context.graphics().text([rect.x, rect.y], self.text, self.font, self.scale, self.color);
     }
 }
 
