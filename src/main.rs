@@ -4,6 +4,7 @@ mod graphics;
 mod render;
 mod alloc;
 
+use alloc::*;
 use graphics::*;
 use render::*;
 use ui::*;
@@ -58,17 +59,18 @@ fn main() {
         // graphics.draw(size.width as f32, size.height as f32);
 
         ui.graphics().clear(Color::rgba(0.1, 0.15, 0.2, 1.0));
-        let a = [1, 2, 3];
-        let tree = Padding::uniform(20.0, Row::new(10.0, children![
-            Row::new(10.0, children![
-                Text::new(&fps_text, font, 14, Color::rgba(1.0, 1.0, 1.0, 1.0)),
-                Text::new("2", font, 14, Color::rgba(1.0, 1.0, 1.0, 1.0)),
+        let xs = [1, 2, 3];
+        let a = Arena::with_capacity(1024);
+        let tree = Padding::uniform(&a, 20.0, Row::new(&a, 10.0, &[
+            Row::new(&a, 10.0, &[
+                Text::new(&a, &fps_text, font, 14, Color::rgba(1.0, 1.0, 1.0, 1.0)),
+                Text::new(&a, "2", font, 14, Color::rgba(1.0, 1.0, 1.0, 1.0)),
             ]),
-            Row::new(10.0, a.iter().map(|x|
-                Text::new(x.to_string(), font, 14, Color::rgba(1.0, 1.0, 1.0, 1.0))
-            )),
+            Row::new(&a, 10.0, &xs.iter().map(|x|
+                Text::new(&a, a.alloc_str(&x.to_string()), font, 14, Color::rgba(1.0, 1.0, 1.0, 1.0)) as &dyn Widget
+            ).collect::<Vec<&dyn Widget>>()),
         ]));
-        ui.run(size.width as f32, size.height as f32, &tree);
+        ui.run(size.width as f32, size.height as f32, tree);
 
         gl_window.swap_buffers().unwrap();
 
