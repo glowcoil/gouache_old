@@ -36,14 +36,15 @@ impl UI {
 
     pub fn run(&mut self, width: f32, height: f32, root: &dyn Widget) {
         self.tree = vec![Node {
-            rect: Rect { x: 0.0, y: 0.0, width: 0.0, height: 0.0 },
             start: 0,
             len: 0,
+            rect: Rect { x: 0.0, y: 0.0, width: 0.0, height: 0.0 },
+            handler: None,
         }];
         root.layout(&mut Context { graphics: &mut self.graphics, tree: &mut self.tree, hover: &self.hover, index: 0 }, width, height);
         self.update_offsets(0, 0.0, 0.0);
         self.hover = HashSet::new();
-        self.trace_cursor(0);
+        self.update_hover(0);
         root.render(&mut Context { graphics: &mut self.graphics, tree: &mut self.tree, hover: &self.hover, index: 0 });
         self.graphics.draw(width, height);
     }
@@ -57,7 +58,14 @@ impl UI {
     }
 
     pub fn input(&mut self, input: Input) {
+        match input {
+            Input::MouseDown(..) | Input::MouseUp(..) | Input::Scroll(..) => {
+                self.mouse_input(0, input);
+            }
+            Input::KeyDown(..) | Input::KeyUp(..) | Input::Char(..) => {
 
+            }
+        }
     }
 
     fn update_offsets(&mut self, i: usize, x: f32, y: f32) {
@@ -69,15 +77,32 @@ impl UI {
         }
     }
 
-    fn trace_cursor(&mut self, i: usize) -> bool {
+    fn update_hover(&mut self, i: usize) -> bool {
         let node = &self.tree[i];
         if node.rect.x <= self.cursor.0 && self.cursor.0 < node.rect.x + node.rect.width &&
            node.rect.y <= self.cursor.1 && self.cursor.1 < node.rect.y + node.rect.height {
             self.hover.insert(i);
             for i in (node.start..node.start+node.len).rev() {
-                self.trace_cursor(i);
+                if self.update_hover(i) { break; }
             }
             true
+        } else {
+            false
+        }
+    }
+
+    fn mouse_input(&self, i: usize, input: Input) -> bool {
+        let node = &self.tree[i];
+        if node.rect.x <= self.cursor.0 && self.cursor.0 < node.rect.x + node.rect.width &&
+           node.rect.y <= self.cursor.1 && self.cursor.1 < node.rect.y + node.rect.height {
+            for i in (node.start..node.start+node.len).rev() {
+                if self.mouse_input(i, input) { return true; }
+            }
+            if let Some(handler) = &node.handler {
+                handler(input)
+            } else {
+                false
+            }
         } else {
             false
         }
@@ -98,10 +123,11 @@ impl<'a> Context<'a> {
 
     pub fn children(&mut self, children: usize) {
         let start = self.tree.len();
-        self.tree.resize(start + children, Node {
-            rect: Rect { x: 0.0, y: 0.0, width: 0.0, height: 0.0 },
+        self.tree.resize_with(start + children, || Node {
             start: 0,
             len: 0,
+            rect: Rect { x: 0.0, y: 0.0, width: 0.0, height: 0.0 },
+            handler: None,
         });
         let mut node = &mut self.tree[self.index];
         node.start = start;
@@ -140,13 +166,17 @@ impl<'a> Context<'a> {
     pub fn hover(&self) -> bool {
         self.hover.contains(&self.index)
     }
+
+    pub fn listen<F>(&mut self, f: F) where F: Fn(Input) -> bool + 'static {
+        self.tree[self.index].handler = Some(Box::new(f));
+    }
 }
 
-#[derive(Clone)]
 pub struct Node {
-    rect: Rect,
     start: usize,
     len: usize,
+    rect: Rect,
+    handler: Option<Box<Fn(Input) -> bool>>,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -255,6 +285,10 @@ impl<'a> Widget for Text<'a> {
         let rect = context.rect();
         context.graphics().text([rect.x, rect.y], self.text, self.font, self.scale, self.color);
         if context.hover() { println!("hover") }
+        context.listen(|input| {
+            println!("test");
+            true
+        });
     }
 }
 
@@ -284,6 +318,7 @@ impl Default for Modifiers {
     }
 }
 
+#[derive(Copy, Clone)]
 pub enum Input {
     MouseDown(MouseButton),
     MouseUp(MouseButton),
@@ -293,6 +328,7 @@ pub enum Input {
     Char(char),
 }
 
+#[derive(Copy, Clone)]
 pub enum Key {
     Key0,
     Key1,
@@ -413,6 +449,7 @@ pub enum Key {
     RightMeta,
 }
 
+#[derive(Copy, Clone)]
 pub enum MouseButton {
     Left,
     Middle,
