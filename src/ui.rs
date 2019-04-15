@@ -137,6 +137,8 @@ impl<W: Widget> Widget for Padding<W> {
         context.children(1);
         self.child.layout(&mut context.child(0), max_width - self.padding.0 - self.padding.2, max_height - self.padding.1 - self.padding.3);
         context.offset(0, self.padding.0, self.padding.1);
+        let child_rect = context.child(0).rect();
+        context.size(child_rect.width + self.padding.0 + self.padding.2, child_rect.height + self.padding.1 + self.padding.3);
     }
 
     fn render(&self, context: &mut Context) {
