@@ -46,6 +46,11 @@ impl Arena {
         result.copy_from_slice(values);
         result
     }
+
+    pub fn alloc_str<'a>(&'a self, string: &str) -> &'a mut str {
+        let bytes = self.alloc_slice(string.as_bytes());
+        unsafe { std::str::from_utf8_unchecked_mut(bytes) }
+    }
 }
 
 #[test]
