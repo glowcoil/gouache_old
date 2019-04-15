@@ -3,17 +3,30 @@ use crate::graphics::*;
 
 use std::f32;
 use std::borrow::Cow;
+use std::collections::HashSet;
 
 pub struct UI {
     graphics: Graphics,
+
     tree: Vec<Node>,
+    hover: HashSet<usize>,
+
+    cursor: (f32, f32),
+    modifiers: Modifiers,
+    mouse: MouseState,
 }
 
 impl UI {
     pub fn new(dpi_factor: f32) -> UI {
         UI {
             graphics: Graphics::new(dpi_factor),
+
             tree: Vec::new(),
+            hover: HashSet::new(),
+
+            cursor: (-1.0, -1.0),
+            modifiers: Modifiers::default(),
+            mouse: MouseState::default(),
         }
     }
 
@@ -27,10 +40,24 @@ impl UI {
             start: 0,
             len: 0,
         }];
-        root.layout(&mut Context { graphics: &mut self.graphics, tree: &mut self.tree, index: 0 }, width, height);
+        root.layout(&mut Context { graphics: &mut self.graphics, tree: &mut self.tree, hover: &self.hover, index: 0 }, width, height);
         self.update_offsets(0, 0.0, 0.0);
-        root.render(&mut Context { graphics: &mut self.graphics, tree: &mut self.tree, index: 0 });
+        self.hover = HashSet::new();
+        self.trace_cursor(0);
+        root.render(&mut Context { graphics: &mut self.graphics, tree: &mut self.tree, hover: &self.hover, index: 0 });
         self.graphics.draw(width, height);
+    }
+
+    pub fn cursor(&mut self, x: f32, y: f32) {
+        self.cursor = (x, y);
+    }
+
+    pub fn modifiers(&mut self, modifiers: Modifiers) {
+        self.modifiers = modifiers;
+    }
+
+    pub fn input(&mut self, input: Input) {
+
     }
 
     fn update_offsets(&mut self, i: usize, x: f32, y: f32) {
@@ -41,11 +68,26 @@ impl UI {
             self.update_offsets(i, x, y);
         }
     }
+
+    fn trace_cursor(&mut self, i: usize) -> bool {
+        let node = &self.tree[i];
+        if node.rect.x <= self.cursor.0 && self.cursor.0 < node.rect.x + node.rect.width &&
+           node.rect.y <= self.cursor.1 && self.cursor.1 < node.rect.y + node.rect.height {
+            self.hover.insert(i);
+            for i in (node.start..node.start+node.len).rev() {
+                self.trace_cursor(i);
+            }
+            true
+        } else {
+            false
+        }
+    }
 }
 
 pub struct Context<'a> {
     graphics: &'a mut Graphics,
     tree: &'a mut Vec<Node>,
+    hover: &'a HashSet<usize>,
     index: usize,
 }
 
@@ -72,6 +114,7 @@ impl<'a> Context<'a> {
         Context {
             graphics: self.graphics,
             tree: self.tree,
+            hover: self.hover,
             index: start + index,
         }
     }
@@ -92,6 +135,10 @@ impl<'a> Context<'a> {
 
     pub fn rect(&self) -> Rect {
         self.tree[self.index].rect
+    }
+
+    pub fn hover(&self) -> bool {
+        self.hover.contains(&self.index)
     }
 }
 
@@ -207,9 +254,44 @@ impl<'a> Widget for Text<'a> {
     fn render(&self, context: &mut Context) {
         let rect = context.rect();
         context.graphics().text([rect.x, rect.y], self.text, self.font, self.scale, self.color);
+        if context.hover() { println!("hover") }
     }
 }
 
+
+pub struct MouseState {
+    left: bool,
+    middle: bool,
+    right: bool,
+}
+
+impl Default for MouseState {
+    fn default() -> MouseState {
+        MouseState { left: false, middle: false, right: false }
+    }
+}
+
+pub struct Modifiers {
+    pub shift: bool,
+    pub ctrl: bool,
+    pub alt: bool,
+    pub meta: bool,
+}
+
+impl Default for Modifiers {
+    fn default() -> Modifiers {
+        Modifiers { shift: false, ctrl: false, alt: false, meta: false }
+    }
+}
+
+pub enum Input {
+    MouseDown(MouseButton),
+    MouseUp(MouseButton),
+    Scroll(f32, f32),
+    KeyDown(Key),
+    KeyUp(Key),
+    Char(char),
+}
 
 pub enum Key {
     Key0,
@@ -324,11 +406,11 @@ pub enum Key {
     LeftShift,
     LeftControl,
     LeftAlt,
-    LeftSuper,
+    LeftMeta,
     RightShift,
     RightControl,
     RightAlt,
-    RightSuper,
+    RightMeta,
 }
 
 pub enum MouseButton {
