@@ -1,5 +1,6 @@
 use crate::graphics::*;
 
+use std::f32;
 use std::borrow::Cow;
 
 pub struct UI {
@@ -113,6 +114,92 @@ pub trait Widget {
     fn render(&self, context: &mut Context);
 }
 
+pub trait WidgetList {
+    fn each(&self, f: impl FnMut(&dyn Widget));
+    fn len(&self) -> usize;
+}
+
+impl<I> WidgetList for I where I: ExactSizeIterator + Clone, I::Item: Widget {
+    fn each(&self, mut f: impl FnMut(&dyn Widget)) {
+        for widget in self.clone() {
+            f(&widget);
+        }
+    }
+
+    fn len(&self) -> usize {
+        ExactSizeIterator::len(self)
+    }
+}
+
+pub struct HCons<T, U>(pub T, pub U);
+pub struct HNil;
+
+impl<T: Widget, U: WidgetList> WidgetList for HCons<T, U> {
+    fn each(&self, mut f: impl FnMut(&dyn Widget)) {
+        let HCons(head, tail) = self;
+        f(head);
+        tail.each(f)
+    }
+
+    fn len(&self) -> usize {
+        let HCons(_, tail) = self;
+        1 + tail.len()
+    }
+}
+
+impl WidgetList for HNil {
+    fn each(&self, mut f: impl FnMut(&dyn Widget)) {}
+
+    fn len(&self) -> usize {
+        0
+    }
+}
+
+macro_rules! children {
+    () => {HNil};
+    ($head:expr $(,)?) => {HCons($head, HNil)};
+    ($head:expr, $($tail:expr),+ $(,)?) => {
+        HCons($head, children!($($tail),+))
+    };
+}
+
+
+pub struct Row<W: WidgetList> {
+    spacing: f32,
+    children: W,
+}
+
+impl<W: WidgetList> Row<W> {
+    pub fn new(spacing: f32, children: W) -> Row<W> {
+        Row { spacing, children }
+    }
+}
+
+impl<W: WidgetList> Widget for Row<W> {
+    fn layout(&self, context: &mut Context, max_width: f32, max_height: f32) {
+        context.children(self.children.len());
+        let mut x: f32 = 0.0;
+        let mut height: f32 = 0.0;
+        let mut i = 0;
+        self.children.each(|child| {
+            child.layout(&mut context.child(i), f32::INFINITY, max_height);
+            context.offset(i, x, 0.0);
+            let child_rect = context.child(i).rect();
+            x += child_rect.width + self.spacing;
+            height = height.max(child_rect.height);
+            i += 1;
+        });
+        context.size(x - self.spacing, height)
+    }
+
+    fn render(&self, context: &mut Context) {
+        let mut i = 0;
+        self.children.each(|child| {
+            child.render(&mut context.child(i));
+            i += 1;
+        });
+    }
+}
 
 pub struct Padding<W: Widget> {
     padding: (f32, f32, f32, f32),
