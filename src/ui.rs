@@ -1,5 +1,7 @@
 use crate::graphics::*;
 
+use std::borrow::Cow;
+
 pub struct UI {
     graphics: Graphics,
     tree: Vec<Node>,
@@ -143,27 +145,27 @@ impl<W: Widget> Widget for Padding<W> {
 }
 
 pub struct Text<'a> {
-    text: &'a str,
+    text: Cow<'a, str>,
     font: FontId,
     scale: u32,
     color: Color,
 }
 
 impl<'a> Text<'a> {
-    pub fn new(text: &'a str, font: FontId, scale: u32, color: Color) -> Text<'a> {
-        Text { text, font, scale, color }
+    pub fn new<S: Into<Cow<'a, str>>>(text: S, font: FontId, scale: u32, color: Color) -> Text<'a> {
+        Text { text: text.into(), font, scale, color }
     }
 }
 
 impl<'a> Widget for Text<'a> {
     fn layout(&self, context: &mut Context, max_width: f32, max_height: f32) {
-        let (width, height) = context.graphics().text_size(self.text, self.font, self.scale);
+        let (width, height) = context.graphics().text_size(&self.text, self.font, self.scale);
         context.size(width, height);
     }
 
     fn render(&self, context: &mut Context) {
         let rect = context.rect();
-        context.graphics().text([rect.x, rect.y], self.text, self.font, self.scale, self.color);
+        context.graphics().text([rect.x, rect.y], &self.text, self.font, self.scale, self.color);
     }
 }
 
