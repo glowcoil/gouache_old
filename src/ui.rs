@@ -41,11 +41,11 @@ impl UI {
             rect: Rect { x: 0.0, y: 0.0, width: 0.0, height: 0.0 },
             handler: None,
         }];
-        root.layout(&mut Context { graphics: &mut self.graphics, tree: &mut self.tree, hover: &self.hover, index: 0 }, width, height);
+        root.layout(Context { graphics: &mut self.graphics, tree: &mut self.tree, hover: &self.hover, index: 0 }, width, height);
         self.update_offsets(0, 0.0, 0.0);
         self.hover = HashSet::new();
         self.update_hover(0);
-        root.render(&mut Context { graphics: &mut self.graphics, tree: &mut self.tree, hover: &self.hover, index: 0 });
+        root.render(Context { graphics: &mut self.graphics, tree: &mut self.tree, hover: &self.hover, index: 0 });
         self.graphics.draw(width, height);
     }
 
@@ -199,8 +199,8 @@ impl Rect {
 }
 
 pub trait Widget {
-    fn layout(&self, context: &mut Context, max_width: f32, max_height: f32);
-    fn render(&self, context: &mut Context);
+    fn layout(&self, context: Context, max_width: f32, max_height: f32);
+    fn render(&self, context: Context);
 }
 
 
@@ -217,12 +217,12 @@ impl<'a> Row<'a> {
 }
 
 impl<'a> Widget for Row<'a> {
-    fn layout(&self, context: &mut Context, max_width: f32, max_height: f32) {
+    fn layout(&self, mut context: Context, max_width: f32, max_height: f32) {
         context.children(self.children.len());
         let mut x: f32 = 0.0;
         let mut height: f32 = 0.0;
         for (i, child) in self.children.iter().enumerate() {
-            child.layout(&mut context.child(i), f32::INFINITY, max_height);
+            child.layout(context.child(i), f32::INFINITY, max_height);
             context.offset(i, x, 0.0);
             let child_rect = context.child(i).rect();
             x += child_rect.width + self.spacing;
@@ -231,10 +231,10 @@ impl<'a> Widget for Row<'a> {
         context.size(x - self.spacing, height)
     }
 
-    fn render(&self, context: &mut Context) {
+    fn render(&self, mut context: Context) {
         let mut i = 0;
         for (i, child) in self.children.iter().enumerate() {
-            child.render(&mut context.child(i));
+            child.render(context.child(i));
         }
     }
 }
@@ -259,16 +259,16 @@ impl<'a> Padding<'a> {
 }
 
 impl<'a> Widget for Padding<'a> {
-    fn layout(&self, context: &mut Context, max_width: f32, max_height: f32) {
+    fn layout(&self, mut context: Context, max_width: f32, max_height: f32) {
         context.children(1);
-        self.child.layout(&mut context.child(0), max_width - self.padding.0 - self.padding.2, max_height - self.padding.1 - self.padding.3);
+        self.child.layout(context.child(0), max_width - self.padding.0 - self.padding.2, max_height - self.padding.1 - self.padding.3);
         context.offset(0, self.padding.0, self.padding.1);
         let child_rect = context.child(0).rect();
         context.size(child_rect.width + self.padding.0 + self.padding.2, child_rect.height + self.padding.1 + self.padding.3);
     }
 
-    fn render(&self, context: &mut Context) {
-        self.child.render(&mut context.child(0));
+    fn render(&self, mut context: Context) {
+        self.child.render(context.child(0));
     }
 }
 
@@ -287,12 +287,12 @@ impl<'a> Text<'a> {
 }
 
 impl<'a> Widget for Text<'a> {
-    fn layout(&self, context: &mut Context, max_width: f32, max_height: f32) {
+    fn layout(&self, mut context: Context, max_width: f32, max_height: f32) {
         let (width, height) = context.graphics().text_size(self.text, self.font, self.scale);
         context.size(width, height);
     }
 
-    fn render(&self, context: &mut Context) {
+    fn render(&self, mut context: Context) {
         let rect = context.rect();
         context.graphics().text([rect.x, rect.y], self.text, self.font, self.scale, self.color);
         if context.hover() { println!("hover") }
