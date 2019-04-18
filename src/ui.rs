@@ -102,8 +102,16 @@ impl UI {
             for i in (start..start+len).rev() {
                 if self.mouse_input(i, input) { return true; }
             }
-            if let Some(handler) = &node.handler {
-                handler(input)
+            if self.tree[i].handler.is_some() {
+                let handler = self.tree[i].handler.take().unwrap();
+                let result = handler(Context {
+                    graphics: &mut self.graphics,
+                    tree: &mut self.tree,
+                    hover: &mut self.hover,
+                    index: i,
+                }, input);
+                self.tree[i].handler = Some(handler);
+                result
             } else {
                 false
             }
@@ -171,7 +179,7 @@ impl<'a> Context<'a> {
         self.hover.contains(&self.index)
     }
 
-    pub fn listen<F>(&mut self, f: F) where F: Fn(Input) -> bool + 'static {
+    pub fn listen<F>(&mut self, f: F) where F: Fn(Context, Input) -> bool + 'static {
         self.tree[self.index].handler = Some(Box::new(f));
     }
 }
@@ -180,7 +188,7 @@ pub struct Node {
     start: usize,
     len: usize,
     rect: Rect,
-    handler: Option<Box<Fn(Input) -> bool>>,
+    handler: Option<Box<Fn(Context, Input) -> bool>>,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -295,11 +303,6 @@ impl<'a> Widget for Text<'a> {
     fn render(&self, mut context: Context) {
         let rect = context.rect();
         context.graphics().text([rect.x, rect.y], self.text, self.font, self.scale, self.color);
-        if context.hover() { println!("hover") }
-        context.listen(|input| {
-            println!("test");
-            true
-        });
     }
 }
 
