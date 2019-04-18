@@ -78,11 +78,13 @@ impl UI {
     }
 
     fn update_hover(&mut self, i: usize) -> bool {
-        let node = &self.tree[i];
-        if node.rect.x <= self.cursor.0 && self.cursor.0 < node.rect.x + node.rect.width &&
-           node.rect.y <= self.cursor.1 && self.cursor.1 < node.rect.y + node.rect.height {
+        let (rect, start, len) = {
+            let node = &self.tree[i];
+            (node.rect, node.start, node.len)
+        };
+        if rect.contains(self.cursor.0, self.cursor.1) {
             self.hover.insert(i);
-            for i in (node.start..node.start+node.len).rev() {
+            for i in (start..start+len).rev() {
                 if self.update_hover(i) { break; }
             }
             true
@@ -91,11 +93,13 @@ impl UI {
         }
     }
 
-    fn mouse_input(&self, i: usize, input: Input) -> bool {
-        let node = &self.tree[i];
-        if node.rect.x <= self.cursor.0 && self.cursor.0 < node.rect.x + node.rect.width &&
-           node.rect.y <= self.cursor.1 && self.cursor.1 < node.rect.y + node.rect.height {
-            for i in (node.start..node.start+node.len).rev() {
+    fn mouse_input(&mut self, i: usize, input: Input) -> bool {
+        let (rect, start, len) = {
+            let node = &self.tree[i];
+            (node.rect, node.start, node.len)
+        };
+        if rect.contains(self.cursor.0, self.cursor.1) {
+            for i in (start..start+len).rev() {
                 if self.mouse_input(i, input) { return true; }
             }
             if let Some(handler) = &node.handler {
@@ -185,6 +189,13 @@ pub struct Rect {
     pub y: f32,
     pub width: f32,
     pub height: f32,
+}
+
+impl Rect {
+    fn contains(&self, x: f32, y: f32) -> bool {
+        self.x <= x && x < self.x + self.width &&
+        self.y <= y && y < self.y + self.height
+    }
 }
 
 pub trait Widget {
