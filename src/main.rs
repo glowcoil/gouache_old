@@ -69,6 +69,7 @@ fn main() {
             Row::new(&a, 10.0, &xs.iter().map(|x|
                 Text::new(&a, a.alloc_str(&x.to_string()), font, 14, Color::rgba(1.0, 1.0, 1.0, 1.0)) as &dyn Widget
             ).collect::<Vec<&dyn Widget>>()),
+            Button::new(&a, Text::new(&a, "button", font, 14, Color::rgba(1.0, 1.0, 1.0, 1.0))),
         ]));
         ui.run(size.width as f32, size.height as f32, tree);
 
@@ -139,8 +140,6 @@ fn glutin_modifiers(modifiers: glutin::ModifiersState) -> Modifiers {
         meta: modifiers.logo,
     }
 }
-
-
 
 fn glutin_key(key: glutin::VirtualKeyCode) -> Option<Key> {
     match key {

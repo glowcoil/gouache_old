@@ -404,6 +404,49 @@ impl<'a> Widget for Text<'a> {
     }
 }
 
+#[derive(Copy, Clone)]
+pub struct Button<'a> {
+    child: &'a dyn Widget,
+}
+
+impl<'a> Button<'a> {
+    pub fn new(arena: &'a Arena, child: &'a dyn Widget) -> &'a Button<'a> {
+        arena.alloc(Button { child: Padding::uniform(arena, 5.0, child) })
+    }
+}
+
+impl<'a> Widget for Button<'a> {
+    fn layout(&self, mut context: LayoutContext, max_width: f32, max_height: f32) {
+        context.children(1);
+        self.child.layout(context.child(0), max_width, max_height);
+        let (child_width, child_height) = context.child_size(0);
+        context.size(child_width, child_height);
+    }
+
+    fn render(&self, mut context: RenderContext) {
+        let color = if context.drag() { Color::rgba(0.2, 0.2, 0.4, 1.0) } else if context.hover() { Color::rgba(0.8, 0.8, 0.9, 1.0) } else { Color::rgba(0.5, 0.5, 0.7, 1.0) };
+        let rect = context.rect();
+        context.graphics().round_rect_fill([rect.x, rect.y], [rect.width, rect.height], 5.0, color);
+        self.child.render(context.child(0));
+        context.listen(|mut context, input| {
+            match input {
+                Input::MouseDown(MouseButton::Left) => {
+                    context.begin_drag();
+                    true
+                }
+                Input::MouseUp(MouseButton::Left) => {
+                    if context.hover() {
+                        println!("click");
+                    }
+                    context.end_drag();
+                    true
+                }
+                _ => { false }
+            }
+        });
+    }
+}
+
 
 pub struct MouseState {
     left: bool,
