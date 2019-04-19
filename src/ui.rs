@@ -3,13 +3,21 @@ use crate::graphics::*;
 
 use std::f32;
 use std::borrow::Cow;
-use std::collections::HashSet;
+use std::collections::{HashSet, HashMap};
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+
+macro_rules! id {
+    () => { { static ID: u8 = 0; &ID as *const u8 as usize as u64 } }
+}
 
 pub struct UI {
     graphics: Graphics,
 
     tree: Vec<Node>,
+    map: HashMap<u64, usize>,
     hover: HashSet<usize>,
+    drag: Option<u64>,
 
     cursor: (f32, f32),
     modifiers: Modifiers,
@@ -22,7 +30,9 @@ impl UI {
             graphics: Graphics::new(dpi_factor),
 
             tree: Vec::new(),
+            map: HashMap::new(),
             hover: HashSet::new(),
+            drag: None,
 
             cursor: (-1.0, -1.0),
             modifiers: Modifiers::default(),
@@ -36,16 +46,21 @@ impl UI {
 
     pub fn run(&mut self, width: f32, height: f32, root: &dyn Widget) {
         self.tree = vec![Node {
+            id: 0,
             start: 0,
             len: 0,
             rect: Rect { x: 0.0, y: 0.0, width: 0.0, height: 0.0 },
             handler: None,
         }];
-        root.layout(Context { graphics: &mut self.graphics, tree: &mut self.tree, hover: &self.hover, index: 0 }, width, height);
+        let hasher = DefaultHasher::new();
+        let mut context = LayoutContext { ui: self, index: 0, parent_hasher: &hasher, hasher: hasher.clone() };
+        context.key(0);
+        root.layout(context, width, height);
         self.update_offsets(0, 0.0, 0.0);
         self.hover = HashSet::new();
         self.update_hover(0);
-        root.render(Context { graphics: &mut self.graphics, tree: &mut self.tree, hover: &self.hover, index: 0 });
+        self.update_map(0);
+        root.render(RenderContext { ui: self, index: 0 });
         self.graphics.draw(width, height);
     }
 
@@ -60,7 +75,11 @@ impl UI {
     pub fn input(&mut self, input: Input) {
         match input {
             Input::MouseDown(..) | Input::MouseUp(..) | Input::Scroll(..) => {
-                self.mouse_input(0, input);
+                if let Some(i) = self.drag.and_then(|id| self.map.get(&id)) {
+                    self.fire(*i, input);
+                } else {
+                    self.mouse_input(0, input);
+                }
             }
             Input::KeyDown(..) | Input::KeyUp(..) | Input::Char(..) => {
 
@@ -93,6 +112,14 @@ impl UI {
         }
     }
 
+    fn update_map(&mut self, i: usize) {
+        let node = &self.tree[i];
+        self.map.insert(node.id, i);
+        for i in node.start..node.start+node.len {
+            self.update_map(i);
+        }
+    }
+
     fn mouse_input(&mut self, i: usize, input: Input) -> bool {
         let (rect, start, len) = {
             let node = &self.tree[i];
@@ -102,93 +129,164 @@ impl UI {
             for i in (start..start+len).rev() {
                 if self.mouse_input(i, input) { return true; }
             }
-            if self.tree[i].handler.is_some() {
-                let handler = self.tree[i].handler.take().unwrap();
-                let result = handler(Context {
-                    graphics: &mut self.graphics,
-                    tree: &mut self.tree,
-                    hover: &mut self.hover,
-                    index: i,
-                }, input);
-                self.tree[i].handler = Some(handler);
-                result
-            } else {
-                false
-            }
+            self.fire(i, input)
+        } else {
+            false
+        }
+    }
+
+    fn fire(&mut self, i: usize, input: Input) -> bool {
+        if self.tree[i].handler.is_some() {
+            let handler = self.tree[i].handler.take().unwrap();
+            let result = handler(EventContext { ui: self, index: i }, input);
+            self.tree[i].handler = Some(handler);
+            result
         } else {
             false
         }
     }
 }
 
-pub struct Context<'a> {
-    graphics: &'a mut Graphics,
-    tree: &'a mut Vec<Node>,
-    hover: &'a HashSet<usize>,
+pub struct LayoutContext<'a> {
+    ui: &'a mut UI,
     index: usize,
+    parent_hasher: &'a DefaultHasher,
+    hasher: DefaultHasher,
 }
 
-impl<'a> Context<'a> {
-    pub fn graphics<'b>(&'b mut self) -> &'b mut Graphics {
-        self.graphics
+impl<'a> LayoutContext<'a> {
+    pub fn graphics<'b>(&'b self) -> &'b Graphics {
+        &self.ui.graphics
     }
 
     pub fn children(&mut self, children: usize) {
-        let start = self.tree.len();
-        self.tree.resize_with(start + children, || Node {
+        let start = self.ui.tree.len();
+        self.ui.tree.resize_with(start + children, || Node {
+            id: 0,
             start: 0,
             len: 0,
             rect: Rect { x: 0.0, y: 0.0, width: 0.0, height: 0.0 },
             handler: None,
         });
-        let mut node = &mut self.tree[self.index];
+        let mut node = &mut self.ui.tree[self.index];
         node.start = start;
         node.len = children;
     }
 
-    pub fn child<'b>(&'b mut self, index: usize) -> Context<'b> {
-        let (len, start) = (self.tree[self.index].len, self.tree[self.index].start);
+    pub fn child<'b>(&'b mut self, index: usize) -> LayoutContext<'b> {
+        let (len, start) = (self.ui.tree[self.index].len, self.ui.tree[self.index].start);
         assert!(index < len, "child index out of range");
-        Context {
-            graphics: self.graphics,
-            tree: self.tree,
-            hover: self.hover,
-            index: start + index,
-        }
+        let mut context = LayoutContext { ui: self.ui, index: start + index, parent_hasher: &self.hasher, hasher: self.hasher.clone() };
+        context.key(index);
+        context
     }
 
-    pub fn offset(&mut self, index: usize, x: f32, y: f32) {
-        let (len, start) = (self.tree[self.index].len, self.tree[self.index].start);
+    pub fn offset_child(&mut self, index: usize, x: f32, y: f32) {
+        let (len, start) = (self.ui.tree[self.index].len, self.ui.tree[self.index].start);
         assert!(index < len, "child index out of range");
-        let mut node = &mut self.tree[start + index];
+        let mut node = &mut self.ui.tree[start + index];
         node.rect.x = x;
         node.rect.y = y;
     }
 
+    pub fn child_size(&self, index: usize) -> (f32, f32) {
+        let (len, start) = (self.ui.tree[self.index].len, self.ui.tree[self.index].start);
+        assert!(index < len, "child index out of range");
+        let rect = self.ui.tree[start + index].rect;
+        (rect.width, rect.height)
+    }
+
     pub fn size(&mut self, width: f32, height: f32) {
-        let mut node = &mut self.tree[self.index];
+        let mut node = &mut self.ui.tree[self.index];
         node.rect.width = width;
         node.rect.height = height;
     }
 
+    pub fn drag(&self) -> bool {
+        self.ui.drag.map_or(false, |id| id == self.ui.tree[self.index].id)
+    }
+
+    pub fn key<K: Hash>(&mut self, key: K) {
+        self.hasher = self.parent_hasher.clone();
+        key.hash(&mut self.hasher);
+        self.ui.tree[self.index].id = self.hasher.finish();
+    }
+
+    pub fn listen<F>(&mut self, f: F) where F: Fn(EventContext, Input) -> bool + 'static {
+        self.ui.tree[self.index].handler = Some(Box::new(f));
+    }
+}
+
+pub struct RenderContext<'a> {
+    ui: &'a mut UI,
+    index: usize,
+}
+
+impl<'a> RenderContext<'a> {
+    pub fn graphics<'b>(&'b mut self) -> &'b mut Graphics {
+        &mut self.ui.graphics
+    }
+
+    pub fn child<'b>(&'b mut self, index: usize) -> RenderContext<'b> {
+        let (len, start) = (self.ui.tree[self.index].len, self.ui.tree[self.index].start);
+        assert!(index < len, "child index out of range");
+        RenderContext { ui: self.ui, index: start + index }
+    }
+
     pub fn rect(&self) -> Rect {
-        self.tree[self.index].rect
+        self.ui.tree[self.index].rect
     }
 
     pub fn hover(&self) -> bool {
-        self.hover.contains(&self.index)
+        self.ui.hover.contains(&self.index)
     }
 
-    pub fn listen<F>(&mut self, f: F) where F: Fn(Context, Input) -> bool + 'static {
-        self.tree[self.index].handler = Some(Box::new(f));
+    pub fn drag(&self) -> bool {
+        self.ui.drag.map_or(false, |id| id == self.ui.tree[self.index].id)
+    }
+
+    pub fn listen<F>(&mut self, f: F) where F: Fn(EventContext, Input) -> bool + 'static {
+        self.ui.tree[self.index].handler = Some(Box::new(f));
+    }
+}
+
+pub struct EventContext<'a> {
+    ui: &'a mut UI,
+    index: usize,
+}
+
+impl<'a> EventContext<'a> {
+    pub fn rect(&self) -> Rect {
+        self.ui.tree[self.index].rect
+    }
+
+    pub fn hover(&self) -> bool {
+        self.ui.hover.contains(&self.index)
+    }
+
+    pub fn drag(&self) -> bool {
+        self.ui.drag.map_or(false, |id| id == self.ui.tree[self.index].id)
+    }
+
+    pub fn begin_drag(&mut self) {
+        self.ui.drag = Some(self.ui.tree[self.index].id);
+    }
+
+    pub fn end_drag(&mut self) {
+        if let Some(id) = self.ui.drag {
+            if id == self.ui.tree[self.index].id {
+                self.ui.drag = None;
+            }
+        }
     }
 }
 
 pub struct Node {
+    id: u64,
     start: usize,
     len: usize,
     rect: Rect,
-    handler: Option<Box<Fn(Context, Input) -> bool>>,
+    handler: Option<Box<Fn(EventContext, Input) -> bool>>,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -207,8 +305,8 @@ impl Rect {
 }
 
 pub trait Widget {
-    fn layout(&self, context: Context, max_width: f32, max_height: f32);
-    fn render(&self, context: Context);
+    fn layout(&self, context: LayoutContext, max_width: f32, max_height: f32);
+    fn render(&self, context: RenderContext);
 }
 
 
@@ -225,21 +323,21 @@ impl<'a> Row<'a> {
 }
 
 impl<'a> Widget for Row<'a> {
-    fn layout(&self, mut context: Context, max_width: f32, max_height: f32) {
+    fn layout(&self, mut context: LayoutContext, max_width: f32, max_height: f32) {
         context.children(self.children.len());
         let mut x: f32 = 0.0;
         let mut height: f32 = 0.0;
         for (i, child) in self.children.iter().enumerate() {
             child.layout(context.child(i), f32::INFINITY, max_height);
-            context.offset(i, x, 0.0);
-            let child_rect = context.child(i).rect();
-            x += child_rect.width + self.spacing;
-            height = height.max(child_rect.height);
+            context.offset_child(i, x, 0.0);
+            let (child_width, child_height) = context.child_size(i);
+            x += child_width + self.spacing;
+            height = height.max(child_height);
         }
         context.size(x - self.spacing, height)
     }
 
-    fn render(&self, mut context: Context) {
+    fn render(&self, mut context: RenderContext) {
         let mut i = 0;
         for (i, child) in self.children.iter().enumerate() {
             child.render(context.child(i));
@@ -267,15 +365,15 @@ impl<'a> Padding<'a> {
 }
 
 impl<'a> Widget for Padding<'a> {
-    fn layout(&self, mut context: Context, max_width: f32, max_height: f32) {
+    fn layout(&self, mut context: LayoutContext, max_width: f32, max_height: f32) {
         context.children(1);
         self.child.layout(context.child(0), max_width - self.padding.0 - self.padding.2, max_height - self.padding.1 - self.padding.3);
-        context.offset(0, self.padding.0, self.padding.1);
-        let child_rect = context.child(0).rect();
-        context.size(child_rect.width + self.padding.0 + self.padding.2, child_rect.height + self.padding.1 + self.padding.3);
+        context.offset_child(0, self.padding.0, self.padding.1);
+        let (child_width, child_height) = context.child_size(0);
+        context.size(child_width + self.padding.0 + self.padding.2, child_height + self.padding.1 + self.padding.3);
     }
 
-    fn render(&self, mut context: Context) {
+    fn render(&self, mut context: RenderContext) {
         self.child.render(context.child(0));
     }
 }
@@ -295,12 +393,12 @@ impl<'a> Text<'a> {
 }
 
 impl<'a> Widget for Text<'a> {
-    fn layout(&self, mut context: Context, max_width: f32, max_height: f32) {
+    fn layout(&self, mut context: LayoutContext, max_width: f32, max_height: f32) {
         let (width, height) = context.graphics().text_size(self.text, self.font, self.scale);
         context.size(width, height);
     }
 
-    fn render(&self, mut context: Context) {
+    fn render(&self, mut context: RenderContext) {
         let rect = context.rect();
         context.graphics().text([rect.x, rect.y], self.text, self.font, self.scale, self.color);
     }
