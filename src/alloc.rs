@@ -47,6 +47,19 @@ impl Arena {
         result
     }
 
+    pub fn alloc_slice_repeat<'a, T: Copy>(&'a self, value: T, len: usize) -> &'a mut [T] {
+        let ptr = self.alloc_bytes(mem::size_of::<T>() * len, mem::align_of::<T>());
+        let result: &'a mut [T] = unsafe { std::slice::from_raw_parts_mut(ptr as *mut T, len) };
+        for item in result.iter_mut() {
+            *item = value;
+        }
+        result
+    }
+
+    pub fn alloc_slice_default<'a, T: Copy + Default>(&'a self, len: usize) -> &'a mut [T] {
+        self.alloc_slice_repeat(T::default(), len)
+    }
+
     pub fn alloc_str<'a>(&'a self, string: &str) -> &'a mut str {
         let bytes = self.alloc_slice(string.as_bytes());
         unsafe { std::str::from_utf8_unchecked_mut(bytes) }
